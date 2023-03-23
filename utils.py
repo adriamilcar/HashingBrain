@@ -48,21 +48,6 @@ def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='p
     return images, pose
 
 
-def create_dataloader(dataset, batch_size=32):
-    '''
-    Creates a DataLoader for Pytorch to train the autoencoder with the image data converted to a tensor.
-    Args
-        dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width).
-        batch_size (int; default=32): the size of the batch updates for the autoencoder training.
-    Returns
-        DataLoader (Pytorch DataLoader): dataloader that is ready to be used for training an autoencoder.
-    '''
-    if dataset.shape[-1] == 3:
-        dataset = np.transpose(dataset, (0,3,1,2))
-    tensor_dataset = TensorDataset(torch.from_numpy(dataset).float(), torch.from_numpy(dataset).float())
-    return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=True)
-
-
 def load_pose_data_from_csv(path):
     '''
     Loads the pose and orientation of the image dataset from a .csv file.
@@ -187,7 +172,7 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[]):
     pos_imgs_norm[:,1] = pos_imgs_norm[:,1]/max_
 
     pos_imgs_norm *= n_bins-1
-    pos_imgs_norm = pos_imgs_norm.astype(int)
+    pos_imgs_norm = pos_imgs_norm.round(0).astype(int)
     
     # Add activation values to each cell in the ratemap and adds Gaussian smoothing.
     n_latent = embeddings.shape[1]
@@ -202,21 +187,23 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[]):
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemap_filtered_Gaussian(ratemaps[i], filter_width)
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
-        ratemaps[i] = ratemaps[i].T
-        if len(occupancy_map) > 0:
-            occ_prob = occupancy_map/np.sum(occupancy_map)
-            ratemaps[i] = ratemaps[i]/occ_prob
-            ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
+            ratemaps[i] = ratemaps[i].T
+            if len(occupancy_map) > 0:
+                occ_prob = occupancy_map/np.sum(occupancy_map)
+                ratemaps[i] = ratemaps[i]/occ_prob
+                ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
         
     return ratemaps
 
 
-def stats_place_fields(ratemaps, peak_as_centroid=True):
+def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5):
     '''
     Runs a simple clustering algorithm to identify place fields, and compute their number, centroids, and sizes, for all ratemaps.
     Args
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with shape (n_latent, n_bins, n_bins).
         peak_as_centroid (bool; default=True): if True, the centroid will be taken as the peak of the place field; if False, it will take the 'center of mass'.
+        min_pix_cluster (bool; default=0.02): minimum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
+        max_pix_cluster (bool; default=0.5): maximum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
     Returns
         all_num_fields (1D numpy array): array with the number of place fields per embedding unit, with shape (n_latent,).
         all_centroids (2D numpy array): array with (x,y) position of all place field centroids, with shape (total_n_place_fields, 2).
@@ -230,9 +217,10 @@ def stats_place_fields(ratemaps, peak_as_centroid=True):
         ratemap = r.copy()
         
         ## Params.
+        total_area = ratemap.shape[0]*ratemaps.shape[1]
         active_pixels_threshold = .2 # 20 percent
-        cluster_min             = 100/2  #200/2
-        cluster_max             = 2000/2 #2500/2
+        cluster_min = total_area*min_pix_cluster  #50
+        cluster_max = total_area*max_pix_cluster #1250
         
         ## Clustering.
         ratemap[ratemap <  ratemap.max()*active_pixels_threshold] = 0
@@ -339,7 +327,8 @@ def polarmaps(embeddings, angles, n_bins=20):
         for ii, c in enumerate(embeddings[:,i]):
             indx = orien_imgs_norm[ii]
             polarmaps[i, indx-1] += c
-        polarmaps[i] = polarmaps[i]/np.max(polarmaps[i])
+        if np.any(polarmaps[i]):
+            polarmaps[i] = polarmaps[i]/np.max(polarmaps[i])
         
     return polarmaps
 
@@ -439,20 +428,23 @@ def hamming_dist_matrix(hashes):
     if len(hashes.shape) == 1:  # if hashes are in str values.
         hash_diffs = hashes.reshape((1, n_samples)) - hashes.reshape((n_samples, 1))
     else:  # otherwise they will be in 64-bit values.
-        hash_diffs = (hashes[:, np.newaxis, :] != hashes).sum(axis=2)
+        hash_diffs = np.sum(hashes[:, np.newaxis, :] != hashes, axis=2)
 
-    hash_diffs_norm = hash_diffs / hash_diffs.max()
-    similarity_matrix = 1. - hash_diffs_norm
+    #hash_diffs_norm = hash_diffs / hash_diffs.max()
+    #similarity_matrix = 1. - hash_diffs_norm
+
+    similarity_matrix = -hash_diffs
 
     return hash_diffs, similarity_matrix
 
 
-def occupancy_map(position, n_bins=50):
+def occupancy_map(position, n_bins=50, filter_width=2):
     '''
     Computes the occupancy map based on the position through time.ç
     Args
         position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
+        filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
     Returns
         occupancy_map (2D numpy array): 2D matrix reflecting the occupancy time across the space, with shape (n_bins, n_bins).
     '''
@@ -473,14 +465,14 @@ def occupancy_map(position, n_bins=50):
     pos_imgs_norm[:,0] = pos_imgs_norm[:,0]/max_
     pos_imgs_norm[:,1] = pos_imgs_norm[:,1]/max_
 
-    #pos_imgs_norm *= n_bins-1
-    #pos_imgs_norm = pos_imgs_norm.astype(int)
+    pos_imgs_norm *= n_bins-1
+    pos_imgs_norm = pos_imgs_norm.round(0).astype(int)
 
     map_occ = np.zeros((n_bins, n_bins))
     for p in pos_imgs_norm:
-        ind_x, ind_y = (p*(n_bins-1)).astype(np.int_)
+        ind_x, ind_y = p
         map_occ[ind_x, ind_y] += 1
-    map_occ = ratemap_filtered_Gaussian(map_occ, 2)
+    map_occ = ratemap_filtered_Gaussian(map_occ, filter_width)
     map_occ = map_occ/np.max(map_occ)
     occupancy_map = map_occ.T
 
@@ -562,7 +554,7 @@ def dist_to_walls(centroids, occupancy_map):
 
 def angles_to_vec(angles):
     '''
-    TO DO.
+    Transforms angles in radians to vectors along the unit-circle.
     Args
         angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
                                          time, with shape (n_samples,).

@@ -4,7 +4,7 @@ import seaborn as sb
 from scipy.stats import expon
 
 
-def plot_ratemaps(r):
+def plot_ratemaps(r, save=False):
     '''
     TO DO.
     '''
@@ -14,10 +14,12 @@ def plot_ratemaps(r):
         plt.imshow(r[i], cmap='hot', origin='lower')
         plt.axis('off')
     plt.tight_layout()
+    if save:
+        plt.savefig('plot_ratemaps.jpg', dpi=600)
     plt.show()
 
 
-def plot_place_field_hist(num_fields):
+def plot_place_field_hist(num_fields, save=False):
     '''
     TO DO.
     '''
@@ -30,10 +32,13 @@ def plot_place_field_hist(num_fields):
     plt.xticks(np.linspace(0, np.max(num_fields), np.max(num_fields)+1, dtype=int), np.linspace(0, np.max(num_fields), np.max(num_fields)+1, dtype=int), fontsize=18)
     plt.ylim(0,1)
     sb.despine()
+    plt.tight_layout()
+    if save:
+        plt.savefig('plot_place_field_hist.jpg', dpi=600)
     plt.show()
 
 
-def plot_polarmaps(p, n_bins=20, n_cells_plot=30):
+def plot_polarmaps(p, n_bins=20, n_cells_plot=30, save=False):
     '''
     TO DO.
     '''
@@ -57,10 +62,12 @@ def plot_polarmaps(p, n_bins=20, n_cells_plot=30):
             bar.set_alpha(0.8)
 
     plt.tight_layout()
+    if save:
+        plt.savefig('plot_polarmaps.jpg', dpi=600)
     plt.show()
 
 
-def plot_similarity_matrix_clustered(similarity_matrix, cluster_labels):
+def plot_similarity_matrix_clustered(similarity_matrix, cluster_labels, save=False):
     '''
     TO DO.
     '''
@@ -71,16 +78,39 @@ def plot_similarity_matrix_clustered(similarity_matrix, cluster_labels):
     plt.xlim(np.count_nonzero(cluster_labels==-1), cluster_labels.size)
     plt.ylim(np.count_nonzero(cluster_labels==-1), cluster_labels.size)
     plt.colorbar()
+    plt.tight_layout()
+    if save:
+        plt.savefig('plot_similarity_matrix_clustered.jpg', dpi=600)
     plt.show()
 
 
-def plot_distance_to_wall(dist_to_wall, sizes):
+def plot_distance_to_wall(dist_to_wall, sizes, norm_area=True, save=False):
     '''
     TO DO.
     '''
+    if norm_area:
+        C = 20  # n of squares to discretize space
+        L = 50  # side length of the arena
+        diff_area = (L**2)/C  # the area difference that has to be maintained between subsequent squares
+
+        lengths = np.zeros(C+1)
+        lengths[0] = L
+
+        # calculate the side lengths of the subsequent squares
+        for i in range(C):
+            lengths[i+1] = np.sqrt(np.maximum(lengths[i]**2 - diff_area, 0))
+
+        bin_edges = (L-lengths)/2
+
+        # Alternative: use linear space w.r.t. distance to wall to compute the areas, and normalize later the bin counts by the corresponding areas.
+        #bin_edges = np.linspace(0, L/2, C+1) - 0.5
+        #bin_areas = np.diff(np.linspace(L, 0, C+1)**2)
+    else:
+        bin_edges = np.arange(0, np.max(dist_to_wall) + 1, 1) - 0.5
+
     # Bin the centroids based on their distance to the nearest wall
-    bin_edges = np.arange(0, np.max(dist_to_wall) + 1, 1) - 0.5
     bin_counts, _ = np.histogram(dist_to_wall, bins=bin_edges)
+    #bin_counts_norm = bin_counts/bin_areas
 
     # Compute the bin centers
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -88,7 +118,7 @@ def plot_distance_to_wall(dist_to_wall, sizes):
     fig, axes = plt.subplots(2,1, figsize=(6,6), gridspec_kw={'height_ratios': [1, 4]})
 
     # Plot the number of centroids in each bin against the average distance to the nearest wall for that bin
-    axes[0].bar(bin_centers, bin_counts, width=1, color='black', alpha=1, edgecolor='white')
+    axes[0].bar(bin_centers, bin_counts, width=np.diff(bin_edges), color='black', alpha=1, edgecolor='white')
     #axes[0].set_xlabel('Distance to wall', fontsize=20)
     axes[0].set_ylabel('# place \nfields', fontsize=20)
     axes[0].set_xticks([])
@@ -110,10 +140,12 @@ def plot_distance_to_wall(dist_to_wall, sizes):
     axes[1].set_anchor('W')
 
     plt.tight_layout()
+    if save:
+        plt.savefig('plot_distance_to_wall.jpg', dpi=600)
     plt.show()
 
 
-def plot_hyperbolic_geometry(sizes, bin_width=10):
+def plot_hyperbolic_geometry(sizes, bin_width=10, save=False):
     '''
     TO DO.
     '''
@@ -151,5 +183,8 @@ def plot_hyperbolic_geometry(sizes, bin_width=10):
     ax1.set_yticks(np.linspace(0, bin_counts.max(), 4).astype(np.int_), np.linspace(0, bin_counts.max(), 4).astype(np.int_), fontsize=16)
 
     sb.despine()
+    plt.tight_layout()
+    if save:
+        plt.savefig('plot_hyperbolic_geometry.jpg', dpi=600)
     plt.show()
 
