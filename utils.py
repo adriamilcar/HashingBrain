@@ -7,6 +7,8 @@ from scipy.spatial.distance import cdist
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.linear_model import LinearRegression
+from sklearn.neighbors import NearestNeighbors
+import skdim
 from random import shuffle
 from PIL import Image
 import imagehash
@@ -15,12 +17,14 @@ import imagehash
 def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='pose.npy'):
     '''
     Loads all .npy or .jpg images and the pose data per image from a given directory.
-    Args
+
+    Args:
         directory (str): path to the images to be loaded.
         file_format (str): format of the images. Accepted formats are .npy and .jpg.
         load_pose (bool): if True, it will also load the pose data.
         pose_filename (str): name of the file with the pose data. The accepted format is .npy.
-    Returns
+
+    Returns:
         images (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) and normalized values [0,1].
         pose (2D numpy array): pose data with (x,y) coordinates and angle (in degrees; [0,360]), wit shape (n_samples, 3).
     '''
@@ -51,9 +55,11 @@ def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='p
 def load_pose_data_from_csv(path):
     '''
     Loads the pose and orientation of the image dataset from a .csv file.
-    Args
+
+    Args:
         path (str): path to the .csv file containing the position 'X', 'Y', and orientation 'Z'.
-    Returns
+
+    Returns:
         position (2D numpy array): pose data with shape (n_samples, x, y), and normalized values [0,1].
         orientation (2D numpy array): orientation data with shape (n_samples, vec_x, vec_y) and angle values in vectorial form.
         angles (2D numpy array): orientation data with shape (n_samples, theta) and values in radians [0,2pi], where 0 (or 2pi) 
@@ -83,9 +89,11 @@ def load_pose_data_from_csv(path):
 def shuffle_2D_matrix(m):
     '''
     Shuffles a matrix across both axis (not only the first axis like numpy.permutation() or random.shuffle()).
-    Args
+
+    Args:
         m (2D numpy array): 2D matrix with arbitrary values.
-    Returns
+
+    Returns:
         m_shuffled (2D numpy array): the original matrix 'm', with all the elements shuffled randomly.
     '''
     N = m.size
@@ -102,11 +110,13 @@ def linear_decoding_score(embeddings, features, n_baseline=10000):
     '''
     Computes the score of linear regression of embeddings --> features. Features will normally be position (x,y) 
     or orientation (radians or in vectorial form).
-    Args
+
+    Args:
         embeddings (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
         features (2D numpy array): 2D matrix containing the dependent variable, with shape (n_samples, n_features).
         n_baseline (int; default=10000): number of permutation tests (i.e., shuffling the embeddings matrix) to compute the baseline.
-    Returns
+
+    Returns:
         scores (float list): a list with two scores: (1) the evaluation of the linear regression, and (2) an average & std 
                              of n_baseline random permutation tests.
     '''
@@ -131,26 +141,32 @@ def linear_decoding_score(embeddings, features, n_baseline=10000):
 def ratemap_filtered_Gaussian(ratemap, std=2):
     '''
     Adds Gaussians filters to a ratemap in order to make it more spatially smooth.
-    Args
+
+    Args:
         ratemap (2D numpy array): unfiltered ratemap with the activity counts across space.
         std (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units). 
-    Returns
+
+    Returns:
         new_ratemap (2D numpy array): original ratemap filtered with Gaussian smoothing.
     '''
     new_ratemap = gaussian_filter(ratemap, std)   
     return new_ratemap
 
 
-def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[]):
+def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], padding=False, n_bins_padding=0):
     '''
-    Creates smooth ratemaps from latent embeddings (activity) and spatial position through time. Note: divide by occupancy map??
-    Args
+    Creates smooth ratemaps from latent embeddings (activity) and spatial position through time.
+
+    Args:
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
         position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
         filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
-        occupancy_map (2D numpy array; default=[]): 2D matrix reflecting the occupancy time across the space, with shape (n_bins, n_bins).
-    Returns
+        occupancy_map (2D numpy array; default=[]): 2D matrix reflecting the occupancy time across the space, with shape (n_bins+2*n_bins_padding, n_bins+2*n_bins_padding).
+        padding (bool; default=False): if True, 'padding_n' extra 0s are added to the walls of the arena.
+        padding_n (int; default=0): the number of extra pixels that are added to every side of the arena.
+
+    Returns:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
                                    shape (n_latent, n_bins, n_bins).
     '''
@@ -173,15 +189,21 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[]):
 
     pos_imgs_norm *= n_bins-1
     pos_imgs_norm = pos_imgs_norm.round(0).astype(int)
-    
+
+    occ_prob = occupancy_map/np.sum(occupancy_map)
+
     # Add activation values to each cell in the ratemap and adds Gaussian smoothing.
     n_latent = embeddings.shape[1]
-    ratemaps = np.zeros((n_latent, n_bins, n_bins))
+    ratemaps = np.zeros((n_latent, int(n_bins+2*n_bins_padding), int(n_bins+2*n_bins_padding)))
     for i in range(n_latent):
+        ratemap_ = np.zeros((n_bins, n_bins))
         for ii, c in enumerate(embeddings[:,i]):
             indx_x = pos_imgs_norm[ii,0]
             indx_y = pos_imgs_norm[ii,1]
-            ratemaps[i, indx_x, indx_y] += c
+            #ratemaps[i, indx_x, indx_y] += c
+            ratemap_[indx_x, indx_y] += c
+        if padding:
+            ratemaps[i] = np.pad(ratemap_, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
         if np.any(ratemaps[i]):
             ratemaps[i] = np.abs(ratemaps[i])
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
@@ -189,22 +211,24 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[]):
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemaps[i].T
             if len(occupancy_map) > 0:
-                occ_prob = occupancy_map/np.sum(occupancy_map)
                 ratemaps[i] = ratemaps[i]/occ_prob
                 ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
         
     return ratemaps
 
 
-def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5):
+def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5, active_pixels_threshold=0.2):
     '''
     Runs a simple clustering algorithm to identify place fields, and compute their number, centroids, and sizes, for all ratemaps.
-    Args
+
+    Args:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with shape (n_latent, n_bins, n_bins).
         peak_as_centroid (bool; default=True): if True, the centroid will be taken as the peak of the place field; if False, it will take the 'center of mass'.
         min_pix_cluster (bool; default=0.02): minimum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
         max_pix_cluster (bool; default=0.5): maximum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
-    Returns
+        active_pixels_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
+
+    Returns:
         all_num_fields (1D numpy array): array with the number of place fields per embedding unit, with shape (n_latent,).
         all_centroids (2D numpy array): array with (x,y) position of all place field centroids, with shape (total_n_place_fields, 2).
         all_sizes (1D numpy array): array with the sizes of all place fields across embedding units, with shape (total_n_place_fields,).
@@ -218,7 +242,6 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         
         ## Params.
         total_area = ratemap.shape[0]*ratemaps.shape[1]
-        active_pixels_threshold = .2 # 20 percent
         cluster_min = total_area*min_pix_cluster  #50
         cluster_max = total_area*max_pix_cluster #1250
         
@@ -305,12 +328,14 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
 def polarmaps(embeddings, angles, n_bins=20):
     '''
     Creates polarmaps from embedding activity and angle orientation through time.
-    Args
+
+    Args:
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
         angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
                                          time, with shape (n_samples,).
         n_bins (int; default=20): resolution of the discretization of angles from which the polarmaps will be computed.
-    Returns
+
+    Returns:
         polarmaps (2D numpy array): 2D matrix containing the polarmaps associated to all embedding units, with 
                                     shape (n_latent, n_bins).
     '''
@@ -336,10 +361,12 @@ def polarmaps(embeddings, angles, n_bins=20):
 def clean_embeddings(embeddings, normalize=False):
     '''
     Takes only the embeddings that are active an any given point, and, if normalize=True, normalizes the values.
-    Args
+
+    Args:
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
         normalize (bool; default=False): if True, the embedding activation values will be normalized to [-1,1], per each unit.
-    Returns
+
+    Returns:
         embeddings_clean (2D numpy array): original embeddings matrix, with the silent units removed, with shape (n_samples, n_active).
     '''
     indxs_active = np.any(embeddings, axis=0)
@@ -357,9 +384,11 @@ def clean_embeddings(embeddings, normalize=False):
 def angular_distance(angle1, angle2):
     '''
     Computes the angular distance between two angles given in radians.
-    Args
+
+    Args:
         angle1, angle2 (float): angles to compare (in radians).
-    Returns
+
+    Returns:
         dist (float): distance value between angle1 and angle2.
     '''
     delta = np.abs(angle1 - angle2)
@@ -371,9 +400,11 @@ def angular_distance(angle1, angle2):
 def euclidean_distance(point1, point2):
     '''
     Computes the Euclidean distance (L2 norm) between two points in space.
-    Args
+
+    Args:
         point1, point2 (1D numpy array): array representing a point in am arbitrary N-dimensional space.
-    Returns
+
+    Returns:
         dist (float): Euclidean distance between point1 and point2 in the N-dimensional space.
     '''
     dist = np.sqrt(np.sum((point1 - point2)**2))
@@ -384,12 +415,14 @@ def euclidean_distance(point1, point2):
 def hashing_data(dataset, in_bits=True):
     '''
     Performs perceptual hashing over all images in the dataset.
-    Args
+
+    Args:
         dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) or
                                   shape (n_samples, n_pixels_height, n_pixels_width, n_channels). Values can be in the ranges
                                   [0,1] or [0,255].
         in_bits (bool; default=True): if True, the hashes will be converted to 64 bits; if False, the hashes will be returned as str.
-    Returns
+
+    Returns:
         hashes (1D or 2D numpy array): 1D array with all the hashing values for each image in 'hash' or str format with shape (n_samples,) 
                                        if in_bits=False, or a 2D array with all the hashing values in bits, with shape (n_samples, 64) if in_bits=True.
     '''
@@ -415,10 +448,12 @@ def hashing_data(dataset, in_bits=True):
 def hamming_dist_matrix(hashes):
     '''
     Computes Hamming distances between hashes, as well as a corresponding similarity matrix.
-    Args
+
+    Args:
         hashes (1D or 2D numpy array): 1D array with all the hashing values for each image in 'hash' or str format with shape (n_samples,),
                                        or a 2D array with all the hashing values in bits, with shape (n_samples, 64).
-    Returns
+
+    Returns:
         hash_diffs (2D numpy array): square matrix with the pairwise Hamming distances between all hashes, with shape (n_samples, n_samples).
         similarity_matrix (2D numpy array): square matrix with the pairwise normalized similarity score based on the hash_diffs, with shape (n_samples. n_samples).
     '''
@@ -438,14 +473,18 @@ def hamming_dist_matrix(hashes):
     return hash_diffs, similarity_matrix
 
 
-def occupancy_map(position, n_bins=50, filter_width=2):
+def occupancy_map(position, n_bins=50, filter_width=2, padding=False, n_bins_padding=0):
     '''
-    Computes the occupancy map based on the position through time.ç
-    Args
+    Computes the occupancy map based on the position through time.
+
+    Args:
         position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
         filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
-    Returns
+        padding (bool; default=False): if True, 'padding_n' extra 0s are added to the walls of the arena.
+        padding_n (int; default=0): the number of extra pixels that are added to every side of the arena.
+
+    Returns:
         occupancy_map (2D numpy array): 2D matrix reflecting the occupancy time across the space, with shape (n_bins, n_bins).
     '''
     # Normalize position with respect to grid resolution to convert position to ratemap indices.
@@ -472,6 +511,10 @@ def occupancy_map(position, n_bins=50, filter_width=2):
     for p in pos_imgs_norm:
         ind_x, ind_y = p
         map_occ[ind_x, ind_y] += 1
+
+    if padding:
+        map_occ = np.pad(map_occ, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
+
     map_occ = ratemap_filtered_Gaussian(map_occ, filter_width)
     map_occ = map_occ/np.max(map_occ)
     occupancy_map = map_occ.T
@@ -482,11 +525,13 @@ def occupancy_map(position, n_bins=50, filter_width=2):
 def spatial_information(ratemaps, occupancy_map):
     '''
     Spatial information score (SI) as computed in Skaggs et al. 1996. The SI is computed per rate (i.e., embedding unit).
-    Args
+
+    Args:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
                                    shape (n_latent, n_bins, n_bins).
         occupancy_map (2D numpy array): 2D matrix reflecting the occupancy time across the space, with shape (n_bins, n_bins).
-    Returns
+
+    Returns:
         SI (1D numpy array): array with SI scores, in bit/spike, with shape (n_latent,).
     '''
     ratemaps_ = ratemaps[np.any(ratemaps, axis=(1,2))]
@@ -502,10 +547,12 @@ def homogeneity_2Dtiling(centroids):
     '''
     Computes a metric of how homogeneously the 2D-space is tiled by the place fields, based on the coefficient of variation of
     the pair-wise minimum distances between centroids (the closer to 0 the better): 
-    for all i -> Std( min( d(pos[i], pos[j..k]) ) ) / Mean( min( d(pos[i], pos[j..k]) ) )
-    Args
+    for all i -> Std( min( d(pos[i], pos[j..k]) ) ) / Mean( min( d(pos[i], pos[j..k]) ) ).
+
+    Args:
         centroids (2D numpy array): array with (x,y) position of all place field centroids, with shape (total_n_place_fields, 2).
-    Returns
+
+    Returns:
         cv (float): coefficient of variation of minimum distances across centroids. Values close to 0 indicate homogeneity.
     '''
     n_centroids = centroids.shape[0]
@@ -525,10 +572,12 @@ def homogeneity_2Dtiling(centroids):
 def dist_to_walls(centroids, occupancy_map):
     '''
     Computes the minimum distance to the arena's walls for every place field centroid.
-    Args
+
+    Args:
         centroids (2D numpy array): array with (x,y) position of all place field centroids, with shape (total_n_place_fields, 2).
         occupancy_map (2D numpy array): 2D matrix reflecting the occupancy time across the space, with shape (n_bins, n_bins).
-    Returns
+
+    Returns:
         min_distances (1D numpy array): array with the distance to the nearest wall for every centroid, with shape (total_n_place_fields,).
     '''
     maze = np.copy(occupancy_map)
@@ -555,10 +604,12 @@ def dist_to_walls(centroids, occupancy_map):
 def angles_to_vec(angles):
     '''
     Transforms angles in radians to vectors along the unit-circle.
-    Args
+
+    Args:
         angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
                                          time, with shape (n_samples,).
-    Returns
+
+    Returns:
         orientation_vec (2D numpy array): 2D array with the angles converted to vectors in the 2D space, with space (n_samples, 2). 
     '''
     angles_rad = np.copy(angles)
@@ -571,3 +622,36 @@ def angles_to_vec(angles):
         orientation_vec[i] = [np.cos(angles_rad[i]), np.sin(angles_rad[i])]
 
     return orientation_vec
+
+
+def intrinsic_dimensionality(dataset, method='PCA'):
+    '''
+    Computes the intrinsic dimensionality of a dataset based on the scikit-dim library. Supported methods are PCA-based and MLE (as in Levina & Bickel (2004)).
+    
+    Args:
+        dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) or
+                                  shape (n_samples, n_pixels_height, n_pixels_width, n_channels). Values can be in the ranges
+                                  [0,1] or [0,255].
+        method (str; default='PCA'): method to estimate the intrinsic dimensionality of the dataset. Valid arguments are 'PCA', and 'MLE', 'TwoNN', and 'FisherS'.
+
+    Returns:
+        D (float): intrinsic dimensionality.
+    '''
+    N = dataset.shape[0]
+    X = np.reshape(dataset, (N, -1))
+
+    estimator_D = None
+    if method == 'PCA':
+        estimator_D = skdim.id.lPCA()
+    elif method == 'MLE':
+        estimator_D = skdim.id.MLE()
+    elif method == 'TwoNN':
+        estimator_D = skdim.id.TwoNN()
+    elif method == 'FisherS':
+        estimator_D = skdim.id.FisherS()
+    else:
+        print('The specific method is not supported, please check the supported methods in the documentation.')
+
+    D = estimator_D.fit_transform(X)
+
+    return D

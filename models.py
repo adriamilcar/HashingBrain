@@ -8,18 +8,27 @@ from tqdm import tqdm
 
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, sparsity=False, k=1):
+    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
-        Args
+
+        Args:
             n_hidden (int; default=100): number of hidden units in the middle layer.
             sparsity (bool; default=False): if True, sparsity of proportion k is added to the middle layer during forward pass.
             k (float; default=1): if sparsity=True, k is the proportion of active neurons allowed at once, within the range [0,1].
         '''
         super().__init__()
 
-        self.sparsity = sparsity
+        self.hard_sparsity = hard_sparsity
         self.kth_percentile = int((1-k) * n_hidden) + 1
+        self.hard_sparsity_min_epochs = hard_sparsity_min_epochs
+        self.current_epoch = 0
+        if self.hard_sparsity_min_epochs > 0:
+            ks = np.linspace(1, k, hard_sparsity_min_epochs)
+            self.kth_percentiles = ((1-ks) * n_hidden).astype(int) + 1
+
+        self.soft_sparsity = soft_sparsity
+        self.sparsity_proportion = k            # desired: 0.12
 
         self.dim1, self.dim2 = 10, 10
 
@@ -55,14 +64,23 @@ class Conv_AE(nn.Module):
 
     def forward(self, x):
         h = self.encoder(x)
-        if self.sparsity:
-            thres = torch.kthvalue(h, self.kth_percentile, keepdim=True)[0]
+        if self.hard_sparsity:
+            if (self.current_epoch < self.hard_sparsity_min_epochs) and (self.hard_sparsity_min_epochs > 0):
+                kth = self.kth_percentiles[self.current_epoch]
+            else:
+                kth = self.kth_percentile
+            thres = torch.kthvalue(h, kth, keepdim=True)[0]
             h = torch.where(h >= thres, h, torch.zeros_like(h))
             h.requires_grad_(True).retain_grad()
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0):
+    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
+        '''
+        TO DO: implement sparsity penalty so that the loss increases if the fraction of units active at each datapoint deviates from a desired one (0.12).
+        '''
+        self.current_epoch = epoch
+
         optimizer.zero_grad()
 
         y_pred, hidden = self.forward(x)
@@ -75,17 +93,23 @@ class Conv_AE(nn.Module):
 
         l1_penalty = L1_lambda * hidden.abs().sum()
 
-        loss = recon_loss + orth_loss + l1_penalty
-
-        if self.sparsity:
+        if self.hard_sparsity:
             sparse_mask = torch.where(hidden != 0, torch.ones_like(hidden), torch.zeros_like(hidden))
             hidden.register_hook(lambda grad: grad * sparse_mask)
 
+        sparsity_loss = 0.
+        if self.soft_sparsity:
+            hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
+            hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
+            diff = hidden_active_prop - self.sparsity_proportion
+            sparsity_loss = soft_sparsity_weight * torch.norm(diff)
+
+        loss = recon_loss + orth_loss + l1_penalty + sparsity_loss
         loss.backward()
 
         optimizer.step()
 
-        return loss.item()
+        return recon_loss.item()
     
 
 class Conv_VAE(nn.Module):
@@ -141,10 +165,12 @@ class Conv_VAE(nn.Module):
 def create_dataloader(dataset, batch_size=64):
     '''
     Creates a DataLoader for Pytorch to train the autoencoder with the image data converted to a tensor.
-    Args
+
+    Args:
         dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width).
         batch_size (int; default=32): the size of the batch updates for the autoencoder training.
-    Returns
+
+    Returns:
         DataLoader (Pytorch DataLoader): dataloader that is ready to be used for training an autoencoder.
     '''
     if dataset.shape[-1] == 3:
@@ -153,7 +179,8 @@ def create_dataloader(dataset, batch_size=64):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=True)
 
 
-def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, device='cuda', L2_weight_decay=1e-5, L1_lambda=1e-2, orth_alpha=1e-1, model_type='VAE', verbose=True):
+def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, device='cuda', L2_weight_decay=0, 
+                      L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, model_type='VAE', verbose=True):
     '''
     TO DO.
     '''
@@ -171,7 +198,8 @@ def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, d
                 inputs, _ = data
                 inputs = inputs.to(device)
 
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, L1_lambda=L1_lambda, orth_alpha=orth_alpha)
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, L1_lambda=L1_lambda, 
+                                      orth_alpha=orth_alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
                 running_loss += loss
 
                 pbar.update(1)
@@ -192,9 +220,11 @@ def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, d
 def predict(image, model):
     '''
     Returns the output of model(image), and reshapes it to be compatible with plotting funtions such as plt.imshow().
+
     Args:
         image (3D numpy array): sample image with shape (n_channels, n_pixels_height, n_pixels_width).
         model (Pytorch Module): convolutional autoencoder that is prepared to process images such as 'image'.
+
     Returns:
         output_img (3D numpy array): output image with shape (n_pixels_height, n_pixels_width, n_channels)
     '''
@@ -212,9 +242,11 @@ def predict(image, model):
 def get_latent_vectors(dataset, model, batch_size=64):
     '''
     Returns the latent activation vectors of the autoencoder model after passing all the images in the dataset.
+
     Args:
         dataset (numpy array): image dataset with shape 
         model (Pytorch Module): convolutional autoencoder that is prepared to process the images in dataset.
+
     Returns:
         latent_vectors (2D numpy array): latent activation vectors, matrix with shape (n_samples, n_hidden), where n_hidden is the number of units in the hidden layer.
     '''
