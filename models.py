@@ -51,6 +51,7 @@ class Conv_AE(nn.Module):
         x = F.relu(self.conv3(x))  
         x = x.view(-1, 64 * self.dim1 * self.dim2)  
         x = F.relu(self.fc1(x))
+        #x = F.sigmoid(self.fc1(x))
         return x
 
     def decoder(self, x):
