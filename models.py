@@ -7,6 +7,11 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 
+def KL_div(p, q):
+    log_ = torch.where(q != 0, torch.log(p/q), torch.zeros_like(q))
+    return p*log_ + (1-p)*torch.log((1-p)/(1-q))
+
+
 class Conv_AE(nn.Module):
     def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0):
         '''
@@ -100,10 +105,14 @@ class Conv_AE(nn.Module):
 
         sparsity_loss = 0.
         if self.soft_sparsity:
+            '''
             hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
             hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
             diff = hidden_active_prop - self.sparsity_proportion
             sparsity_loss = soft_sparsity_weight * torch.norm(diff)
+            '''
+            mean_activation = torch.mean(hidden, dim=0)
+            sparsity_loss = soft_sparsity_weight * torch.sum(KL_div(self.sparsity_proportion, mean_activation))
 
         loss = recon_loss + orth_loss + l1_penalty + sparsity_loss
         loss.backward()
@@ -161,6 +170,14 @@ class Conv_VAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         out = self.decoder(z)
         return out, mu, logvar
+
+    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
+        optimizer.zero_grad()
+        y_pred, mu, logvar = self.forward(x)
+        loss = criterion(y_pred, y_true)
+        loss.backward()
+        optimizer.step()
+        return loss.item()
 
 
 def create_dataloader(dataset, batch_size=64):
@@ -229,7 +246,7 @@ def predict(image, model):
     Returns:
         output_img (3D numpy array): output image with shape (n_pixels_height, n_pixels_width, n_channels)
     '''
-    if image.shape[-1] == 3:
+    if image.shape[-1] <= 4:
         image = np.transpose(image, (2,0,1))
     n_channels, n_pixels_height, n_pixels_width = image.shape
     image = np.reshape(image, (1, n_channels, n_pixels_height, n_pixels_width))
@@ -251,7 +268,7 @@ def get_latent_vectors(dataset, model, batch_size=64):
     Returns:
         latent_vectors (2D numpy array): latent activation vectors, matrix with shape (n_samples, n_hidden), where n_hidden is the number of units in the hidden layer.
     '''
-    if dataset.shape[-1] == 3:
+    if dataset.shape[-1] <= 4:
         dataset = np.transpose(dataset, (0,3,1,2))
     tensor_dataset = TensorDataset(torch.from_numpy(dataset).float(), torch.from_numpy(dataset).float())
     data_loader = DataLoader(tensor_dataset, batch_size=batch_size, shuffle=False)
