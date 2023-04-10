@@ -12,6 +12,7 @@ import skdim
 from random import shuffle
 from PIL import Image
 import imagehash
+import cmath
 
 
 def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='pose.npy'):
@@ -716,3 +717,26 @@ def population_sparseness(ratemaps, active_threshold=0.2):
 
     return sparseness
 
+
+def allocentricity(embeddings, angles, n_bins=20):
+    '''
+    Computes an allocentric score as the average of the circular variances (i.e., mean resultant lenghts) of the polarmaps for the non-silent units.
+    Args:
+        embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
+        angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
+                                         time, with shape (n_samples,).
+        n_bins (int; default=20): resolution of the discretization of angles from which the polarmaps will be computed.
+    Returns:
+        allocentric_score (float): average circular variance for all non-silent units.
+    '''
+    all_polarmaps = polarmaps(clean_embeddings(embeddings), angles, n_bins=n_bins)
+    bin_centers = np.linspace(0, 2*np.pi, n_bins, endpoint=False)
+    circ_vars = []
+    for polarmap in all_polarmaps:
+        mean_vec = np.exp(1j * bin_centers) @ polarmap / np.sum(polarmap)
+        circ_var = 1 - np.abs(mean_vec)
+        circ_vars.append(circ_var)
+
+    allocentric_score = np.mean(circ_vars)
+
+    return allocentric_score
