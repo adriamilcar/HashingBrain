@@ -135,7 +135,9 @@ def linear_decoding_score(embeddings, features, n_baseline=10000):
 
     baseline_score = [np.mean(baselines), np.std(baselines)]
 
-    return linear_score, baseline_score
+    ratio = linear_score/(baseline_score[0])
+
+    return linear_score, baseline_score, ratio
 
 
 def ratemap_filtered_Gaussian(ratemap, std=2):
@@ -217,7 +219,7 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
     return ratemaps
 
 
-def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5, active_pixels_threshold=0.2):
+def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5, active_threshold=0.2):
     '''
     Runs a simple clustering algorithm to identify place fields, and compute their number, centroids, and sizes, for all ratemaps.
 
@@ -226,7 +228,7 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         peak_as_centroid (bool; default=True): if True, the centroid will be taken as the peak of the place field; if False, it will take the 'center of mass'.
         min_pix_cluster (bool; default=0.02): minimum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
         max_pix_cluster (bool; default=0.5): maximum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
-        active_pixels_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
+        active_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
 
     Returns:
         all_num_fields (1D numpy array): array with the number of place fields per embedding unit, with shape (n_latent,).
@@ -246,8 +248,8 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         cluster_max = total_area*max_pix_cluster #1250
         
         ## Clustering.
-        ratemap[ratemap <  ratemap.max()*active_pixels_threshold] = 0
-        ratemap[ratemap >= ratemap.max()*active_pixels_threshold] = 1
+        ratemap[ratemap <  ratemap.max()*active_threshold] = 0
+        ratemap[ratemap >= ratemap.max()*active_threshold] = 1
 
         visited_matrix  = np.zeros_like(ratemap)
 
@@ -379,6 +381,20 @@ def clean_embeddings(embeddings, normalize=False):
         embeddings_clean = embeddings_clean / maxs
 
     return embeddings_clean
+
+
+def clean_ratemaps(ratemaps):
+    '''
+    Discards the ratemaps of the silent units.
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with shape (n_latent, n_bins, n_bins).
+    Returns:
+        ratemaps_clean (3D numpy array): 3D matrix containing the ratemaps associated to the embedding units that are not silent, with shape (n_latent-n_silent, n_bins, n_bins).
+    '''
+    indxs_active = np.any(ratemaps, axis=0)
+    ratemaps_clean = ratemaps[indxs_active]
+
+    return ratemaps_clean
 
 
 def angular_distance(angle1, angle2):
@@ -681,4 +697,22 @@ def input_output_similarity(dataset, embeddings, N=1e5):
     return corr_score
 
 
+def population_sparseness(ratemaps, active_threshold=0.2):
+    '''
+    Estimates the population sparseness as the expected number of active units per pixel (i.e., location in space).
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
+                                   shape (n_latent, n_bins, n_bins).
+        active_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
+    Returns:
+        sparseness (float): population sparseness score as 1 minus the average proportion of active units across the environment, within the range [0,1].
+    '''
+    ratemaps_thres = np.copy(ratemaps)
+    ratemaps_thres[ratemaps_thres<active_threshold] = 0
+    ratemaps_thres[ratemaps_thres>=active_threshold] = 1
+
+    prop_active_per_pixel = np.mean(all_ratemaps_thres, axis=0)
+    sparseness = 1 - np.mean(prop_active_per_pixel)
+
+    return sparseness
 
