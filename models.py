@@ -197,24 +197,22 @@ def create_dataloader(dataset, batch_size=64):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=True)
 
 
-def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, device='cuda', L2_weight_decay=0, 
-                      L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, model_type='VAE', verbose=True):
+def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, L2_weight_decay=0, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0):
     '''
     TO DO.
     '''
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
     criterion = nn.MSELoss()
 
-    model = model.to(device)
+    model = model.to('cuda')
 
     history = []
-    embeddings = []
     for epoch in range(num_epochs):
         running_loss = 0.
         with tqdm(total=len(train_loader)) as pbar:
             for i, data in enumerate(train_loader, 0):
                 inputs, _ = data
-                inputs = inputs.to(device)
+                inputs = inputs.to('cuda')
 
                 loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, L1_lambda=L1_lambda, 
                                       orth_alpha=orth_alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
@@ -224,15 +222,8 @@ def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, d
                 pbar.set_description(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}")
 
         history.append(running_loss/len(train_loader))
-        '''
-        inputs = next(iter(trainloader))[0]
-        outputs, hidden = model(inputs)
-        embedding = torch.cat(hidden, dim=0).detach().clone().cpu().numpy().tolist()
-        embeddings.append(embedding)
-        '''
-    #embeddings = np.array(embeddings)
 
-    return history, embeddings
+    return history
 
 
 def predict(image, model):

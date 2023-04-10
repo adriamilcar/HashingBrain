@@ -655,3 +655,30 @@ def intrinsic_dimensionality(dataset, method='PCA'):
     D = estimator_D.fit_transform(X)
 
     return D
+
+
+def input_output_similarity(dataset, embeddings, N=1e5):
+    '''
+    Estimates the slope of the correlation between image and embedding similarity, to check whether similar images lead to similar embeddings.
+    Args:
+        dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) or
+                                  shape (n_samples, n_pixels_height, n_pixels_width, n_channels). Values can be in the ranges
+                                  [0,1] or [0,255].
+        embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
+        N (float; default=1e5): number of random pairs of samples from the dataset and embeddings used to compute the correlation.
+    Returns:
+        corr_score (float): slope of the spearman's correlation (rank-based) between image similarity and embedding similariy, within the range [0,1].
+    '''
+    spatial_pos_dist = []
+    latent_vec_dist = []
+    for i in range(N):
+        ind_1, ind_2 = np.random.choice(np.arange(dataset.shape[0]), 2, replace=False)
+        spatial_pos_dist.append( euclidean_distance(dataset[ind_1], dataset[ind_2]) )
+        latent_vec_dist.append( euclidean_distance(embeddings[ind_1], embeddings[ind_2]) )
+
+    corr_score, _ = np.polyfit(spatial_pos_dist, latent_vec_dist, 1)
+
+    return corr_score
+
+
+
