@@ -688,7 +688,7 @@ def input_output_similarity(dataset, embeddings, N=1e5):
     '''
     spatial_pos_dist = []
     latent_vec_dist = []
-    for i in range(N):
+    for i in range(int(N)):
         ind_1, ind_2 = np.random.choice(np.arange(dataset.shape[0]), 2, replace=False)
         spatial_pos_dist.append( euclidean_distance(dataset[ind_1], dataset[ind_2]) )
         latent_vec_dist.append( euclidean_distance(embeddings[ind_1], embeddings[ind_2]) )
@@ -712,7 +712,7 @@ def population_sparseness(ratemaps, active_threshold=0.2):
     ratemaps_thres[ratemaps_thres<active_threshold] = 0
     ratemaps_thres[ratemaps_thres>=active_threshold] = 1
 
-    prop_active_per_pixel = np.mean(all_ratemaps_thres, axis=0)
+    prop_active_per_pixel = np.mean(ratemaps_thres, axis=0)
     sparseness = 1 - np.mean(prop_active_per_pixel)
 
     return sparseness
