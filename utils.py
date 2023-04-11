@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter
 from scipy.spatial.distance import cdist
+from scipy.stats import spearmanr
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.linear_model import LinearRegression
@@ -685,6 +686,7 @@ def input_output_similarity(dataset, embeddings, N=1e5):
         N (float; default=1e5): number of random pairs of samples from the dataset and embeddings used to compute the correlation.
     Returns:
         corr_score (float): slope of the spearman's correlation (rank-based) between image similarity and embedding similariy, within the range [0,1].
+        slope (float): slope of the linear fit between pairwise dataset distances and embedding distances.
     '''
     spatial_pos_dist = []
     latent_vec_dist = []
@@ -693,9 +695,11 @@ def input_output_similarity(dataset, embeddings, N=1e5):
         spatial_pos_dist.append( euclidean_distance(dataset[ind_1], dataset[ind_2]) )
         latent_vec_dist.append( euclidean_distance(embeddings[ind_1], embeddings[ind_2]) )
 
-    corr_score, _ = np.polyfit(spatial_pos_dist, latent_vec_dist, 1)
+    slope, _ = np.polyfit(spatial_pos_dist, latent_vec_dist, 1)
 
-    return corr_score
+    corr_score = spearmanr(spatial_pos_dist, latent_vec_dist).correlation.round(2)
+
+    return corr_score, slope
 
 
 def population_sparseness(ratemaps, active_threshold=0.2):
