@@ -712,7 +712,8 @@ def population_sparseness(ratemaps, active_threshold=0.2):
     Returns:
         sparseness (float): population sparseness score as 1 minus the average proportion of active units across the environment, within the range [0,1].
     '''
-    ratemaps_thres = np.copy(ratemaps)
+    #ratemaps_thres = np.copy(ratemaps)
+    ratemaps_thres = clean_ratemaps(ratemaps)
     ratemaps_thres[ratemaps_thres<active_threshold] = 0
     ratemaps_thres[ratemaps_thres>=active_threshold] = 1
 
@@ -744,3 +745,16 @@ def allocentricity(embeddings, angles, n_bins=20):
     allocentric_score = np.mean(circ_vars)
 
     return allocentric_score
+
+def n_active_cells(ratemaps):
+    '''
+    Computes the number of units that have at least some activity (non-silent).
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
+                                   shape (n_latent, n_bins, n_bins).
+    Returns:
+        n_active (int): number of active units.
+    '''
+    n_active = np.count_nonzero( np.any(ratemaps, axis=0) )
+
+    return n_active
