@@ -92,11 +92,12 @@ class Conv_AE(nn.Module):
         y_pred, hidden = self.forward(x)
 
         recon_loss = criterion(y_pred, y_true)
-
-        gram = torch.matmul(hidden.t(), hidden)  # Compute the Gram matrix of the hidden layer's activations
-        diff = gram - torch.eye(hidden.size(1), device='cuda')   # Compute the Frobenius norm of the difference between the Gram matrix and the identity matrix
+        
+        batch_size, hidden_dim = hidden.shape
+        gram = torch.mm(hidden.t(), hidden) / (batch_size*hidden_dim)  # Compute the Gram matrix of the hidden layer's activations
+        diff = gram - torch.eye(hidden_dim, device='cuda')   # Compute the Frobenius norm of the difference between the Gram matrix and the identity matrix
         orth_loss = orth_alpha * torch.norm(diff, p='fro')
-
+        
         l1_penalty = L1_lambda * hidden.abs().sum()
 
         if self.hard_sparsity:

@@ -329,6 +329,42 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
     return np.array(all_num_fields), np.array(all_centroids), np.array(all_sizes)
 
 
+def prop_cells_with_place_fields(ratemaps, min_pix_cluster=0.02, max_pix_cluster=0.5, active_threshold=0.2):
+    '''
+    Computes the number of active (i.e., non-silent) units that have at least one place field.
+    
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with shape (n_latent, n_bins, n_bins).
+        min_pix_cluster (bool; default=0.02): minimum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
+        max_pix_cluster (bool; default=0.5): maximum proportion of the total pixels that need to be active within a region to be considered a place field, with a range [0,1].
+        active_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
+
+    Returns:
+        prop_cells (float): proportion of active units that have one or more place fields, within the range [0,1].
+    '''
+    all_num_fields = stats_place_fields(ratemaps=clean_ratemaps(ratemaps), min_pix_cluster=min_pix_cluster, 
+                                        max_pix_cluster=max_pix_cluster, active_threshold=active_threshold)[0]
+
+    prop_cells = np.count_nonzero(all_num_fields) / all_num_fields.shape[0]
+
+    return prop_cells
+
+
+def n_active_cells(ratemaps):
+    '''
+    Computes the number of units that have at least some activity (non-silent).
+    
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
+                                   shape (n_latent, n_bins, n_bins).
+    Returns:
+        n_active (int): number of active units.
+    '''
+    n_active = np.count_nonzero( np.any(ratemaps, axis=0) )
+
+    return n_active
+
+
 def polarmaps(embeddings, angles, n_bins=20):
     '''
     Creates polarmaps from embedding activity and angle orientation through time.
@@ -393,7 +429,7 @@ def clean_ratemaps(ratemaps):
     Returns:
         ratemaps_clean (3D numpy array): 3D matrix containing the ratemaps associated to the embedding units that are not silent, with shape (n_latent-n_silent, n_bins, n_bins).
     '''
-    indxs_active = np.any(ratemaps, axis=0)
+    indxs_active = np.any(ratemaps, axis=(1,2))
     ratemaps_clean = ratemaps[indxs_active]
 
     return ratemaps_clean
@@ -678,6 +714,7 @@ def intrinsic_dimensionality(dataset, method='PCA'):
 def input_output_similarity(dataset, embeddings, N=1e5):
     '''
     Estimates the slope of the correlation between image and embedding similarity, to check whether similar images lead to similar embeddings.
+    
     Args:
         dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) or
                                   shape (n_samples, n_pixels_height, n_pixels_width, n_channels). Values can be in the ranges
@@ -705,6 +742,7 @@ def input_output_similarity(dataset, embeddings, N=1e5):
 def population_sparseness(ratemaps, active_threshold=0.2):
     '''
     Estimates the population sparseness as the expected number of active units per pixel (i.e., location in space).
+    
     Args:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
                                    shape (n_latent, n_bins, n_bins).
@@ -726,6 +764,7 @@ def population_sparseness(ratemaps, active_threshold=0.2):
 def allocentricity(embeddings, angles, n_bins=20):
     '''
     Computes an allocentric score as the average of the circular variances (i.e., mean resultant lenghts) of the polarmaps for the non-silent units.
+    
     Args:
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
         angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
@@ -745,16 +784,3 @@ def allocentricity(embeddings, angles, n_bins=20):
     allocentric_score = np.mean(circ_vars)
 
     return allocentric_score
-
-def n_active_cells(ratemaps):
-    '''
-    Computes the number of units that have at least some activity (non-silent).
-    Args:
-        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
-                                   shape (n_latent, n_bins, n_bins).
-    Returns:
-        n_active (int): number of active units.
-    '''
-    n_active = np.count_nonzero( np.any(ratemaps, axis=0) )
-
-    return n_active
