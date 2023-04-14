@@ -157,7 +157,7 @@ def ratemap_filtered_Gaussian(ratemap, std=2):
     return new_ratemap
 
 
-def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], padding=False, n_bins_padding=0):
+def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], n_bins_padding=0):
     '''
     Creates smooth ratemaps from latent embeddings (activity) and spatial position through time.
 
@@ -167,8 +167,7 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
         filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
         occupancy_map (2D numpy array; default=[]): 2D matrix reflecting the occupancy time across the space, with shape (n_bins+2*n_bins_padding, n_bins+2*n_bins_padding).
-        padding (bool; default=False): if True, 'padding_n' extra 0s are added to the walls of the arena.
-        padding_n (int; default=0): the number of extra pixels that are added to every side of the arena.
+        n_bins_padding (int; default=0): the number of extra pixels with 0 value that are added to every side of the arena.
 
     Returns:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
@@ -206,8 +205,7 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
             indx_y = pos_imgs_norm[ii,1]
             #ratemaps[i, indx_x, indx_y] += c
             ratemap_[indx_x, indx_y] += c
-        if padding:
-            ratemaps[i] = np.pad(ratemap_, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
+        ratemaps[i] = np.pad(ratemap_, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
         if np.any(ratemaps[i]):
             ratemaps[i] = np.abs(ratemaps[i])
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
