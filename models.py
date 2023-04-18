@@ -96,18 +96,28 @@ class Conv_AE(nn.Module):
         # To enforce orthonormality (i.e., units form an orthonormal set of basis vectors), a.k.a. high-dimensional PCA, SVD, or Sanger's rule (GHA).
         batch_size, hidden_dim = hidden.shape
         gram = torch.mm(hidden.t(), hidden)  # Compute the Gram matrix of the hidden layer's activations
-        #identity = torch.eye(hidden_dim, device='cuda')
-        identity = torch.diag( (hidden.sum(dim=0) != 0).float() )
+        identity = torch.eye(hidden_dim, device='cuda')
+        #identity = torch.diag( (hidden.sum(dim=0) != 0).float() )
         orth_loss = orth_alpha * torch.norm(gram - identity, p='fro') / (batch_size*hidden_dim) # Compute the Frobenius norm of the difference between the Gram matrix and the identity matrix
-
         '''
-        # To enforce pairwise decorrelation (i.e., orthogonality, not orthonormality).
+        # To enforce pairwise decorrelation (i.e., orthogonality).
         batch_size, hidden_dim = hidden.shape
         gram = torch.mm(hidden.t(), hidden)
         mask = 1 - torch.eye(hidden_dim, device='cuda')
-        orth_loss = orth_alpha * torch.sum((gram*mask)**2) / (batch_size*hidden_dim)
+        orth_loss = orth_alpha * torch.norm(gram * mask, p='fro') / (batch_size*hidden_dim)
+        
+        # To enforce orthogonal weights
+        weights = self.fc1.weight
+        gram = torch.mm(weights, weights.t())
+        mask = 1 - torch.eye(weights.shape[0], device='cuda')
+        orth_loss = orth_alpha * torch.norm(gram * mask, p='fro')
+        
+        # To enforce orthonormal weights
+        weights = self.fc1.weight
+        gram = torch.mm(weights, weights.t())
+        identity = torch.eye(weights.shape[0], device='cuda')
+        orth_loss = orth_alpha * torch.norm(gram - identity, p='fro')
         '''
-
         l1_penalty = L1_lambda * hidden.abs().sum()
 
         if self.hard_sparsity:
