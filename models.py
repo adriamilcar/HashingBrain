@@ -82,9 +82,6 @@ class Conv_AE(nn.Module):
         return out, h
 
     def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
-        '''
-        TO DO: implement sparsity penalty so that the loss increases if the fraction of units active at each datapoint deviates from a desired one (0.12).
-        '''
         self.current_epoch = epoch
 
         optimizer.zero_grad()
@@ -125,7 +122,7 @@ class Conv_AE(nn.Module):
             hidden.register_hook(lambda grad: grad * sparse_mask)
 
         sparsity_loss = 0.
-        if self.soft_sparsity:
+        if self.soft_sparsity:  # sparsity penalty so that the loss increases if the fraction of units active at each datapoint deviates from a desired one (0.12).
             '''
             hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
             hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
