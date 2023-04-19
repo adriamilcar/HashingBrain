@@ -108,40 +108,6 @@ def shuffle_2D_matrix(m):
     return m_shuffled
 
 
-def linear_decoding_score(embeddings, features, n_baseline=10000):
-    '''
-    Computes the score of linear regression of embeddings --> features. Features will normally be position (x,y) 
-    or orientation (radians or in vectorial form).
-
-    Args:
-        embeddings (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
-        features (2D numpy array): 2D matrix containing the dependent variable, with shape (n_samples, n_features).
-        n_baseline (int; default=10000): number of permutation tests (i.e., shuffling the embeddings matrix) to compute the baseline.
-
-    Returns:
-        scores (float list): a list with two scores: (1) the evaluation of the linear regression, and (2) an average & std 
-                             of n_baseline random permutation tests.
-    '''
-    linear_model = LinearRegression()
-    linear_model.fit(embeddings, features)
-    linear_score = linear_model.score(embeddings, features)
-
-    #baseline
-    baselines = []
-    for i in range(n_baseline):
-        embeddings_shuffled = shuffle_2D_matrix(np.copy(embeddings))
-        linear_model_baseline = LinearRegression()
-        linear_model_baseline.fit(embeddings_shuffled, features)
-        random_score = linear_model_baseline.score(embeddings_shuffled, features)
-        baselines.append(random_score)
-
-    baseline_score = [np.mean(baselines), np.std(baselines)]
-
-    ratio = linear_score/(baseline_score[0])
-
-    return linear_score, baseline_score, ratio
-
-
 def ratemap_filtered_Gaussian(ratemap, std=2):
     '''
     Adds Gaussians filters to a ratemap in order to make it more spatially smooth.
@@ -782,3 +748,37 @@ def allocentricity(embeddings, angles, n_bins=20):
     allocentric_score = np.mean(circ_vars)
 
     return allocentric_score
+
+
+def linear_decoding_score(embeddings, features, n_baseline=10000):
+    '''
+    Computes the score of linear regression of embeddings --> features. Features will normally be position (x,y) 
+    or orientation (radians or in vectorial form).
+
+    Args:
+        embeddings (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
+        features (2D numpy array): 2D matrix containing the dependent variable, with shape (n_samples, n_features).
+        n_baseline (int; default=10000): number of permutation tests (i.e., shuffling the embeddings matrix) to compute the baseline.
+
+    Returns:
+        scores (float list): a list with two scores: (1) the evaluation of the linear regression, and (2) an average & std 
+                             of n_baseline random permutation tests.
+    '''
+    linear_model = LinearRegression()
+    linear_model.fit(embeddings, features)
+    linear_score = linear_model.score(embeddings, features)
+
+    #baseline
+    baselines = []
+    for i in range(n_baseline):
+        embeddings_shuffled = shuffle_2D_matrix(np.copy(embeddings))
+        linear_model_baseline = LinearRegression()
+        linear_model_baseline.fit(embeddings_shuffled, features)
+        random_score = linear_model_baseline.score(embeddings_shuffled, features)
+        baselines.append(random_score)
+
+    baseline_score = [np.mean(baselines), np.std(baselines)]
+
+    ratio = linear_score/(baseline_score[0])
+
+    return linear_score, baseline_score, ratio
