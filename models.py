@@ -198,7 +198,7 @@ class Conv_VAE(nn.Module):
         return loss.item()
 
 
-def create_dataloader(dataset, batch_size=64):
+def create_dataloader(dataset, batch_size=64, reshuffle_after_epoch=True):
     '''
     Creates a DataLoader for Pytorch to train the autoencoder with the image data converted to a tensor.
 
@@ -212,7 +212,7 @@ def create_dataloader(dataset, batch_size=64):
     if dataset.shape[-1] == 3:
         dataset = np.transpose(dataset, (0,3,1,2))
     tensor_dataset = TensorDataset(torch.from_numpy(dataset).float(), torch.from_numpy(dataset).float())
-    return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=True)
+    return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
 def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, L2_weight_decay=0, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0):
@@ -225,8 +225,10 @@ def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, L
     model = model.to('cuda')
 
     history = []
+    #embeddings = []
     for epoch in range(num_epochs):
         running_loss = 0.
+        #epoch_embeddings = []
         with tqdm(total=len(train_loader)) as pbar:
             for i, data in enumerate(train_loader, 0):
                 inputs, _ = data
@@ -236,12 +238,17 @@ def train_autoencoder(model, train_loader, num_epochs=100, learning_rate=1e-3, L
                                       orth_alpha=orth_alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
                 running_loss += loss
 
+                # Save the embeddings after processing all data in each epoch
+                #if i == len(train_loader)-1:
+                    #epoch_embeddings.append(model.encode(inputs).detach().cpu().numpy())
+
                 pbar.update(1)
                 pbar.set_description(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}")
 
         history.append(running_loss/len(train_loader))
+        #embeddings.append(np.concatenate(epoch_embeddings))
 
-    return history
+    return history#, embeddings
 
 
 def predict(image, model):
