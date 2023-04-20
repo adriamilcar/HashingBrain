@@ -782,3 +782,25 @@ def linear_decoding_score(embeddings, features, n_baseline=10000):
     ratio = linear_score/(baseline_score[0])
 
     return linear_score, baseline_score, ratio
+
+
+def linear_decoding_error(embeddings, features, norm=1):
+    '''
+    Computes the expected error of a linear decoder that uses the embeddings to predicts features (e.g. position in (x,y)).
+
+    Args:
+        embeddings (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
+        features (2D numpy array): 2D matrix containing the dependent variable, with shape (n_samples, n_features).
+        norm (float; default=1): value used to normalize the MSE and bring it to a more convenient scale.
+
+    Returns:
+        mean_dist (float): average euclidean distance between the predictions of the decoder and the actual features, normalized by a scalar.
+    '''
+    linear_model = LinearRegression()
+    linear_model.fit(embeddings, features)
+    pred = linear_model.predict(embeddings)
+
+    dist = np.sqrt(np.sum((pred - features)**2, axis=1))
+    mean_dist = np.mean(dist) / norm
+
+    return mean_dist
