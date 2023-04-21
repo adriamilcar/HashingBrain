@@ -225,7 +225,9 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_
     model = model.to('cuda')
 
     history = []
-    embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
+    embeddings = []
+    if len(dataset) > 0:
+        embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
     for epoch in range(num_epochs):
         running_loss = 0.
         with tqdm(total=len(train_loader)) as pbar:

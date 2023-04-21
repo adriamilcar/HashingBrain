@@ -390,6 +390,7 @@ def clean_ratemaps(ratemaps):
     Discards the ratemaps of the silent units.
     Args:
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with shape (n_latent, n_bins, n_bins).
+
     Returns:
         ratemaps_clean (3D numpy array): 3D matrix containing the ratemaps associated to the embedding units that are not silent, with shape (n_latent-n_silent, n_bins, n_bins).
     '''
@@ -685,6 +686,7 @@ def input_output_similarity(dataset, embeddings, N=1e5):
                                   [0,1] or [0,255].
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
         N (float; default=1e5): number of random pairs of samples from the dataset and embeddings used to compute the correlation.
+
     Returns:
         corr_score (float): slope of the spearman's correlation (rank-based) between image similarity and embedding similariy, within the range [0,1].
         slope (float): slope of the linear fit between pairwise dataset distances and embedding distances.
@@ -711,6 +713,7 @@ def population_sparseness(ratemaps, active_threshold=0.2):
         ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
                                    shape (n_latent, n_bins, n_bins).
         active_threshold (float; default=0.2): percentage over the maximum activity from which pixels are considered to be active, otherwise they become 0; within a range [0,1].
+    
     Returns:
         sparseness (float): population sparseness score as 1 minus the average proportion of active units across the environment, within the range [0,1].
     '''
@@ -734,6 +737,7 @@ def allocentricity(embeddings, angles, n_bins=20):
         angles (list or 1D numpy array): list or 1D array containing the orientation angle (in radians or degrees) through 
                                          time, with shape (n_samples,).
         n_bins (int; default=20): resolution of the discretization of angles from which the polarmaps will be computed.
+        
     Returns:
         allocentric_score (float): average circular variance for all non-silent units.
     '''
