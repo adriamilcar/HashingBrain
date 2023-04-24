@@ -13,7 +13,7 @@ def KL_div(p, q):
 
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0):
+    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0, hidden_constraint='orthonormal'):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
@@ -34,6 +34,8 @@ class Conv_AE(nn.Module):
 
         self.soft_sparsity = soft_sparsity
         self.sparsity_proportion = k            # desired: 0.12
+
+        self.hidden_constraint = hidden_constraint
 
         self.dim1, self.dim2 = 10, 10
 
@@ -56,7 +58,6 @@ class Conv_AE(nn.Module):
         x = F.relu(self.conv3(x))  
         x = x.view(-1, 64 * self.dim1 * self.dim2)  
         x = F.relu(self.fc1(x))
-        #x = F.sigmoid(self.fc1(x))
         return x
 
     def decoder(self, x):
@@ -81,7 +82,7 @@ class Conv_AE(nn.Module):
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
+    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, alpha=0, soft_sparsity_weight=0, epoch=0):
         self.current_epoch = epoch
 
         optimizer.zero_grad()
@@ -89,33 +90,42 @@ class Conv_AE(nn.Module):
         y_pred, hidden = self.forward(x)
 
         recon_loss = criterion(y_pred, y_true)
-        
-        # To enforce orthonormality (i.e., units form an orthonormal set of basis vectors), a.k.a. high-dimensional PCA, SVD, or Sanger's rule (GHA).
-        batch_size, hidden_dim = hidden.shape
-        gram = torch.mm(hidden.t(), hidden)  # Compute the Gram matrix of the hidden layer's activations
-        identity = torch.eye(hidden_dim, device='cuda')
-        #identity = torch.diag( (hidden.sum(dim=0) != 0).float() )
-        orth_loss = orth_alpha * torch.norm(gram - identity, p='fro') / (batch_size*hidden_dim) # Compute the Frobenius norm of the difference between the Gram matrix and the identity matrix
+
         '''
-        # To enforce pairwise decorrelation (i.e., orthogonality).
+        # To regularize the weights instead of the activations.
         batch_size, hidden_dim = hidden.shape
-        gram = torch.mm(hidden.t(), hidden)
-        mask = 1 - torch.eye(hidden_dim, device='cuda')
-        orth_loss = orth_alpha * torch.norm(gram * mask, p='fro') / (batch_size*hidden_dim)
-        
-        # To enforce orthogonal weights
         weights = self.fc1.weight
-        gram = torch.mm(weights, weights.t())
-        mask = 1 - torch.eye(weights.shape[0], device='cuda')
-        orth_loss = orth_alpha * torch.norm(gram * mask, p='fro')
-        
-        # To enforce orthonormal weights
-        weights = self.fc1.weight
-        gram = torch.mm(weights, weights.t())
-        identity = torch.eye(weights.shape[0], device='cuda')
-        orth_loss = orth_alpha * torch.norm(gram - identity, p='fro')
+        Gram = torch.mm(weights, weights.t())
+        I = torch.eye(weights.shape[0], device='cuda')
         '''
-        l1_penalty = L1_lambda * hidden.abs().sum()
+
+        batch_size, hidden_dim = hidden.shape
+        Gram = torch.mm(hidden.t(), hidden)  # Compute the Gramian matrix of the hidden layer's activations (pairwise-correlations or similarity).
+        I = torch.eye(hidden_dim, device='cuda')  # Identity matrix.
+        #I = torch.diag( (hidden.sum(dim=0) != 0).float() )
+        
+        if self.hidden_constraint == 'orthonormal':    # orthogonality + normalization --> it does generate place fields
+            k = 1
+            M = (k*I - Gram)
+
+        elif self.hidden_constraint == 'orthogonal':   # orthogonality --> does not generate place fields
+            M = (I - Gram) * (1 - I)
+
+        elif self.hidden_constraint == 'normalized':   # normalization  --> does not generate place fields
+            M = (I - Gram) * I
+
+        elif self.hidden_constraint == 'sparse':
+            M = Gram * I
+
+        elif self.hidden_constraint == 'orthosparse':
+            M = Gram
+
+        else:
+            M = torch.Tensor(0)
+
+        hidden_constraint_loss = alpha * torch.norm(M, p='fro') / (batch_size*hidden_dim)
+
+        l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
 
         if self.hard_sparsity:
             sparse_mask = torch.where(hidden != 0, torch.ones_like(hidden), torch.zeros_like(hidden))
@@ -132,7 +142,7 @@ class Conv_AE(nn.Module):
             mean_activation = torch.mean(hidden, dim=0)
             sparsity_loss = soft_sparsity_weight * torch.sum(KL_div(self.sparsity_proportion, mean_activation))
 
-        loss = recon_loss + orth_loss + l1_penalty + sparsity_loss
+        loss = recon_loss + hidden_constraint_loss + l1_penalty + sparsity_loss
         loss.backward()
 
         optimizer.step()
@@ -215,7 +225,7 @@ def create_dataloader(dataset, batch_size=128, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_rate=1e-3, L2_weight_decay=0, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0):
+def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_rate=1e-3, L2_weight_decay=0, L1_lambda=0, alpha=0, soft_sparsity_weight=0):
     '''
     TO DO.
     '''
@@ -236,7 +246,7 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_
                 inputs = inputs.to('cuda')
 
                 loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, L1_lambda=L1_lambda, 
-                                      orth_alpha=orth_alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
+                                      alpha=alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
                 running_loss += loss
 
                 pbar.update(1)
