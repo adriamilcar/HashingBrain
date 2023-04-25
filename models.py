@@ -13,7 +13,7 @@ def KL_div(p, q):
 
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0, hidden_constraint='orthonormal'):
+    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0, hidden_constraints=[]):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
@@ -35,7 +35,7 @@ class Conv_AE(nn.Module):
         self.soft_sparsity = soft_sparsity
         self.sparsity_proportion = k            # desired: 0.12
 
-        self.hidden_constraint = hidden_constraint
+        self.hidden_constraints = hidden_constraints
 
         self.dim1, self.dim2 = 10, 10
 
@@ -93,37 +93,23 @@ class Conv_AE(nn.Module):
 
         '''
         # To regularize the weights instead of the activations.
-        batch_size, hidden_dim = hidden.shape
         weights = self.fc1.weight
         Gram = torch.mm(weights, weights.t())
         I = torch.eye(weights.shape[0], device='cuda')
         '''
 
         batch_size, hidden_dim = hidden.shape
-        Gram = torch.mm(hidden.t(), hidden)  # Compute the Gramian matrix of the hidden layer's activations (pairwise-correlations or similarity).
-        I = torch.eye(hidden_dim, device='cuda')  # Identity matrix.
-        #I = torch.diag( (hidden.sum(dim=0) != 0).float() )
         
-        if self.hidden_constraint == 'orthonormal':    # orthogonality + normalization --> it does generate place fields
-            k = 1
-            M = (k*I - Gram)
-
-        elif self.hidden_constraint == 'orthogonal':   # orthogonality --> does not generate place fields
-            M = (I - Gram) * (1 - I)
-
-        elif self.hidden_constraint == 'normalized':   # normalization  --> does not generate place fields
-            M = (I - Gram) * I
-
-        elif self.hidden_constraint == 'sparse':
-            M = Gram * I
-
-        elif self.hidden_constraint == 'orthosparse':
-            M = Gram
+        if len(self.hidden_constraints) > 0:
+            a, b = self.hidden_constraints
+            Gram = torch.mm(hidden.t(), hidden)        # Compute the Gramian matrix of the hidden layer's activations (pairwise-correlations or similarity).
+            I = torch.eye(hidden_dim, device='cuda')   # Identity matrix.
+            M = (a - Gram) * I + (b - Gram) * (1 - I)
 
         else:
             M = torch.Tensor(0)
 
-        hidden_constraint_loss = alpha * torch.norm(M, p='fro') / (batch_size*hidden_dim)
+        hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
 
         l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
 
