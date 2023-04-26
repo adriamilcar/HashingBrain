@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter
 from scipy.spatial.distance import cdist
 from scipy.stats import spearmanr
+from scipy.signal import correlate2d
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.linear_model import LinearRegression
@@ -808,3 +809,25 @@ def linear_decoding_error(embeddings, features, norm=1):
     mean_dist = np.mean(dist) / norm
 
     return mean_dist
+
+
+def autocorrelation_2d(ratemaps):
+    '''
+     Generates the autocorrelation matrices of the 2D ratemaps.
+    
+    Args:
+        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
+                                   shape (n_latent, n_bins, n_bins).
+
+    Returns:
+        autocorr (3D numpy array): 3D matrix containing the 2D autocorrelation associated to the ratemaps, with 
+                                   shape (n_latent, n_bins, n_bins).
+    '''
+    autocorr = []
+    for i in range(ratemaps.shape[0]):
+        autocorr_map = correlate2d(ratemaps[i], ratemaps[i], mode='same')
+        autocorr_map /= ratemaps[i].size
+        autocorr.append( autocorr_map )
+
+    return autocorr
+
