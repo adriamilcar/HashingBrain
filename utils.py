@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter
 from scipy.spatial.distance import cdist
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, pearsonr
 from scipy.signal import correlate2d
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -830,4 +830,34 @@ def autocorrelation_2d(ratemaps):
         autocorr.append( autocorr_map )
 
     return autocorr
+
+
+def pv_correlation(embeddings1, embeddings2, position, n_bins=50):
+    '''
+    Computes the population vector (PV) correlation coefficient between two ratemaps (normally corresponding to different epochs).
+
+    Args:
+        embeddings1 (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
+        embeddings2 (2D numpy array): 2D matrix containing the independent variable, with shape (n_samples, n_latent).
+        position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
+        n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
+
+    Returns:
+        pv_corr (float): average correlation coefficient across spatial locations between the ratemaps corresponding to embeddings 1 and 2.
+    '''
+    n_total_bins = int(n_bins**2)
+    ratemaps1 = ratemaps(embeddings1, position, n_bins=n_bins, filter_width=0, occupancy_map=[], n_bins_padding=0)
+    ratemaps1 = np.reshape(ratemaps1, (ratemaps1.shape[0], n_total_bins))
+
+    ratemaps2 = ratemaps(embeddings2, position, n_bins=n_bins, filter_width=0, occupancy_map=[], n_bins_padding=0)
+    ratemaps2 = np.reshape(ratemaps2, (ratemaps2.shape[0], n_total_bins))
+
+    corr_coefs = []
+    for i in range(n_total_bins):
+        corr_coef = pearsonr(ratemaps1[:,i], ratemaps2[:,i])[0]
+        corr_coefs.append(corr_coef)
+
+    pv_corr = np.nanmean(corr_coefs).round(3)
+
+    return pv_corr
 
