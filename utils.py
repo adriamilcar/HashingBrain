@@ -729,6 +729,18 @@ def population_sparseness(ratemaps, active_threshold=0.2):
     return sparseness
 
 
+def unit_sparseness(embeddings):
+    '''
+    Computes the expected proportion of samples for which individual units respond to.
+    Args:
+        embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
+    Returns:
+        sparseness (float): average proportion of data samples, w.r.t. the total dataset size, that make units be active.
+    '''
+    sparseness = np.mean(np.count_nonzero(clean_embeddings(embeddings), axis=0)/embeddings.shape[0])
+
+    return sparseness
+
 def allocentricity(embeddings, angles, n_bins=20):
     '''
     Computes an allocentric score as the average of the circular variances (i.e., mean resultant lenghts) of the polarmaps for the non-silent units.
