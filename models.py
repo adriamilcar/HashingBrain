@@ -37,6 +37,7 @@ class Conv_AE(nn.Module):
 
         self.hidden_constraints = hidden_constraints
 
+        self.n_hidden = n_hidden
         self.dim1, self.dim2 = 10, 10
 
         # Encoder
@@ -140,6 +141,7 @@ class Conv_VAE(nn.Module):
     def __init__(self, n_hidden=100):
         super().__init__()
 
+        self.n_hidden = n_hidden
         self.dim1, self.dim2 = 10, 10
 
         # Encoder
@@ -295,4 +297,28 @@ def get_latent_vectors(dataset, model, batch_size=128):
     latent_vectors = np.concatenate(latent_vectors)
     return latent_vectors
 
+
+def find_max_activation_images(model, img_shape=[3, 84, 84]):
+    '''
+    To be tested.
+    '''
+    images = []
+    for i in range(model.n_hidden):
+        # Initialize input image
+        x = torch.randn(1, img_shape[0], img_shape[1], img_shape[2], device='cuda', requires_grad=True)
+
+        # Use optimizer to perform gradient ascent
+        optimizer = optim.Adam([x], lr=1e-3)
+
+        for j in range(1000):
+            optimizer.zero_grad()
+            _, mu, _ = model(x)
+            loss = -mu[0, i]  # maximize activation of ith unit
+            loss.backward()
+            optimizer.step()
+
+        # Add image to list
+        images.append(x.detach().cpu().numpy()[0, 0])
+
+    return np.array(images)
     
