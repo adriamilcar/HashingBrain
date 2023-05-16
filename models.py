@@ -190,7 +190,8 @@ class Conv_VAE(nn.Module):
     def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
         optimizer.zero_grad()
         y_pred, mu, logvar = self.forward(x)
-        loss = criterion(y_pred, y_true)
+        kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        loss = criterion(y_pred, y_true) + kl_div
         loss.backward()
         optimizer.step()
         return loss.item()
@@ -303,6 +304,7 @@ def find_max_activation_images(model, img_shape=[3, 84, 84]):
     To be tested.
     '''
     images = []
+    #model = model.to('cuda')
     for i in range(model.n_hidden):
         # Initialize input image
         x = torch.randn(1, img_shape[0], img_shape[1], img_shape[2], device='cuda', requires_grad=True)

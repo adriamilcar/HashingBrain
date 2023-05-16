@@ -741,6 +741,7 @@ def unit_sparseness(embeddings):
 
     return sparseness
 
+
 def allocentricity(embeddings, angles, n_bins=20):
     '''
     Computes an allocentric score as the average of the circular variances (i.e., mean resultant lenghts) of the polarmaps for the non-silent units.
