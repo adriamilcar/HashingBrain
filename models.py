@@ -6,14 +6,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-
+'''
 def KL_div(p, q):
     log_ = torch.where(q != 0, torch.log(p/q), torch.zeros_like(q))
     return p*log_ + (1-p)*torch.log((1-p)/(1-q))
-
+'''
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0, hidden_constraints=[]):
+    def __init__(self, n_hidden=100, hidden_constraints=[]): #, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
@@ -24,6 +24,7 @@ class Conv_AE(nn.Module):
         '''
         super().__init__()
 
+        '''
         self.hard_sparsity = hard_sparsity
         self.kth_percentile = int((1-k) * n_hidden) + 1
         self.hard_sparsity_min_epochs = hard_sparsity_min_epochs
@@ -34,7 +35,7 @@ class Conv_AE(nn.Module):
 
         self.soft_sparsity = soft_sparsity
         self.sparsity_proportion = k            # desired: 0.12
-
+        '''
         self.hidden_constraints = hidden_constraints
 
         self.n_hidden = n_hidden
@@ -72,6 +73,7 @@ class Conv_AE(nn.Module):
 
     def forward(self, x):
         h = self.encoder(x)
+        '''
         if self.hard_sparsity:
             if (self.current_epoch < self.hard_sparsity_min_epochs) and (self.hard_sparsity_min_epochs > 0):
                 kth = self.kth_percentiles[self.current_epoch]
@@ -80,11 +82,12 @@ class Conv_AE(nn.Module):
             thres = torch.kthvalue(h, kth, keepdim=True)[0]
             h = torch.where(h >= thres, h, torch.zeros_like(h))
             h.requires_grad_(True).retain_grad()
+        '''
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, alpha=0, soft_sparsity_weight=0, epoch=0):
-        self.current_epoch = epoch
+    def backward(self, optimizer, criterion, x, y_true, alpha=0): #, L1_lambda=0, soft_sparsity_weight=0, epoch=0):
+        #self.current_epoch = epoch
 
         optimizer.zero_grad()
 
@@ -99,19 +102,17 @@ class Conv_AE(nn.Module):
         I = torch.eye(weights.shape[0], device='cuda')
         '''
 
+        hidden_constraint_loss = 0
         batch_size, hidden_dim = hidden.shape
-        
         if len(self.hidden_constraints) > 0:
             a, b = self.hidden_constraints
             Gram = torch.mm(hidden.t(), hidden)        # Compute the Gramian matrix of the hidden layer's activations (pairwise-correlations or similarity).
             I = torch.eye(hidden_dim, device='cuda')   # Identity matrix.
-            M = (a - Gram) * I + (b - Gram) * (1 - I)
+            #M = (a - Gram) * I + (b - Gram) * (1 - I)
+            M = a*I - Gram  # more efficient
+            hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
 
-        else:
-            M = torch.Tensor(0)
-
-        hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
-
+        '''
         l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
 
         if self.hard_sparsity:
@@ -120,16 +121,15 @@ class Conv_AE(nn.Module):
 
         sparsity_loss = 0.
         if self.soft_sparsity:  # sparsity penalty so that the loss increases if the fraction of units active at each datapoint deviates from a desired one (0.12).
-            '''
-            hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
-            hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
-            diff = hidden_active_prop - self.sparsity_proportion
-            sparsity_loss = soft_sparsity_weight * torch.norm(diff)
-            '''
+            #hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
+            #hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
+            #diff = hidden_active_prop - self.sparsity_proportion
+            #sparsity_loss = soft_sparsity_weight * torch.norm(diff)
             mean_activation = torch.mean(hidden, dim=0)
             sparsity_loss = soft_sparsity_weight * torch.sum(KL_div(self.sparsity_proportion, mean_activation))
+        '''
 
-        loss = recon_loss + hidden_constraint_loss + l1_penalty + sparsity_loss
+        loss = recon_loss + hidden_constraint_loss #+ l1_penalty + sparsity_loss
         loss.backward()
 
         optimizer.step()
@@ -187,7 +187,7 @@ class Conv_VAE(nn.Module):
         out = self.decoder(z)
         return out, mu, logvar
 
-    def backward(self, optimizer, criterion, x, y_true, L1_lambda=0, orth_alpha=0, soft_sparsity_weight=0, epoch=0):
+    def backward(self, optimizer, criterion, x, y_true, alpha=0): #, L1_lambda=0, soft_sparsity_weight=0, epoch=0):
         optimizer.zero_grad()
         y_pred, mu, logvar = self.forward(x)
         kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
@@ -197,7 +197,7 @@ class Conv_VAE(nn.Module):
         return loss.item()
 
 
-def create_dataloader(dataset, batch_size=128, reshuffle_after_epoch=True):
+def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     '''
     Creates a DataLoader for Pytorch to train the autoencoder with the image data converted to a tensor.
 
@@ -234,8 +234,8 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_
                 inputs, _ = data
                 inputs = inputs.to('cuda')
 
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, L1_lambda=L1_lambda, 
-                                      alpha=alpha, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha)
+                                      # L1_lambda=L1_lambda, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
                 running_loss += loss
 
                 pbar.update(1)
@@ -273,7 +273,7 @@ def predict(image, model):
     return output_img
 
 
-def get_latent_vectors(dataset, model, batch_size=128):
+def get_latent_vectors(dataset, model, batch_size=256):
     '''
     Returns the latent activation vectors of the autoencoder model after passing all the images in the dataset.
 
