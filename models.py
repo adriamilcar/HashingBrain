@@ -102,7 +102,7 @@ class Conv_AE(nn.Module):
         I = torch.eye(weights.shape[0], device='cuda')
         '''
 
-        hidden_constraint_loss = 0
+        hidden_constraint_loss = torch.Tensor(0)
         batch_size, hidden_dim = hidden.shape
         if len(self.hidden_constraints) > 0:
             a, b = self.hidden_constraints
