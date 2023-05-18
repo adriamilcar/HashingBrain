@@ -737,7 +737,8 @@ def unit_sparseness(embeddings):
     Returns:
         sparseness (float): average proportion of data samples, w.r.t. the total dataset size, that make units be active.
     '''
-    sparseness = np.mean(np.count_nonzero(clean_embeddings(embeddings), axis=0)/embeddings.shape[0])
+    embeddings_clean = clean_embeddings(embeddings)
+    sparseness = np.mean(np.count_nonzero(embeddings_clean, axis=0)/embeddings_clean.shape[0])
 
     return sparseness
 
