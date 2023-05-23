@@ -101,7 +101,8 @@ class Conv_AE(nn.Module):
         Gram = torch.mm(weights, weights.t())
         I = torch.eye(weights.shape[0], device='cuda')
         '''
-
+        '''
+        # Approximate whitening loss.
         hidden_constraint_loss = torch.Tensor(0)
         batch_size, hidden_dim = hidden.shape
         if len(self.hidden_constraints) > 0:
@@ -111,7 +112,21 @@ class Conv_AE(nn.Module):
             #M = (a - Gram) * I + (b - Gram) * (1 - I)
             M = a*I - Gram  # more efficient
             hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
-
+        '''
+        
+        # Whitening loss (batch whitening).
+        hidden_constraint_loss = torch.Tensor(0)
+        batch_size, hidden_dim = hidden.shape
+        if len(self.hidden_constraints) > 0:
+            I = torch.eye(hidden_dim, device='cuda')
+            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+            Cov = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size*hidden_dim)
+            #Cov = torch.mm(hidden.t(), hidden)  # SSCP matrix (uncentered Cov)
+            M = I - Cov         # whitening
+            #M = Cov * (1 - I)  # decorrelation
+            #M = I - Cov * I    # (variance) standarization 
+            hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
+        
         '''
         l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
 
@@ -214,7 +229,8 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], num_epochs=100, learning_rate=1e-3, L2_weight_decay=0, L1_lambda=0, alpha=0, soft_sparsity_weight=0):
+def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, L2_weight_decay=0):
+                      #L1_lambda=0,  soft_sparsity_weight=0):
     '''
     TO DO.
     '''
