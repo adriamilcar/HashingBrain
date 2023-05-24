@@ -115,17 +115,29 @@ class Conv_AE(nn.Module):
         '''
         
         # Whitening loss (batch whitening).
-        hidden_constraint_loss = torch.Tensor(0)
+        hidden_constraint_loss = 0
         batch_size, hidden_dim = hidden.shape
         if len(self.hidden_constraints) > 0:
+
+            # SSCP matrix
+            M = torch.mm(hidden.t(), hidden)
+
+            # Covariance matrix
+            #hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+            #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
+            '''
+            # Correlation matrix
+            column_mask = torch.all(hidden==0, dim=0)   # remove all neurons that do not activate at all.
+            hidden_clean = hidden[:, ~column_mask]
+            hidden_Z = (hidden_clean - torch.mean(hidden_clean, dim=0, keepdim=True)) / torch.std(hidden_clean, dim=0, keepdim=True)
+            M = torch.mm(hidden_Z.t(), hidden_Z) / (hidden_clean.shape[0]-1)
+            hidden_dim = hidden_clean.shape[1]
+            '''
             I = torch.eye(hidden_dim, device='cuda')
-            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
-            Cov = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size*hidden_dim)
-            #Cov = torch.mm(hidden.t(), hidden)  # SSCP matrix (uncentered Cov)
-            M = I - Cov         # whitening
-            #M = Cov * (1 - I)  # decorrelation
-            #M = I - Cov * I    # (variance) standarization 
-            hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
+            C = I - M        # whitening --> generates spatial tuning
+            #C = M * (1 - I)  # decorrelation --> does not generate spatial tuning
+            #C = I - M * I    # standarization --> does not generate spatial tuning
+            hidden_constraint_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
         
         '''
         l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
