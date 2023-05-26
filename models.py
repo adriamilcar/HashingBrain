@@ -102,7 +102,7 @@ class Conv_AE(nn.Module):
         I = torch.eye(weights.shape[0], device='cuda')
         '''
         '''
-        # Approximate whitening loss.
+        # Relaxed whitening loss.
         hidden_constraint_loss = torch.Tensor(0)
         batch_size, hidden_dim = hidden.shape
         if len(self.hidden_constraints) > 0:

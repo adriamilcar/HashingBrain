@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.linear_model import LinearRegression
 from sklearn.neighbors import NearestNeighbors
+from sklearn.cluster import AffinityPropagation
 import skdim
 from random import shuffle
 from PIL import Image
