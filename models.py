@@ -134,7 +134,7 @@ class Conv_AE(nn.Module):
             hidden_dim = hidden_clean.shape[1]
             '''
             I = torch.eye(hidden_dim, device='cuda')
-            C = I - M        # whitening --> generates spatial tuning
+            C = 0.1*I - M        # whitening --> generates spatial tuning
             #C = M * (1 - I)  # decorrelation --> does not generate spatial tuning
             #C = I - M * I    # standarization --> does not generate spatial tuning
             hidden_constraint_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
