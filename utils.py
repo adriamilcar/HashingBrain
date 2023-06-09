@@ -876,3 +876,74 @@ def pv_correlation(embeddings1, embeddings2, position, n_bins=50):
 
     return pv_corr
 
+
+def image_whitening(dataset):
+    '''
+    Whitening as in Stringer et al. (2019) Nature.
+    '''
+    images = dataset
+    num_images = images.shape[0]
+    image_shape = images[0].shape
+
+    # Compute Fourier spectrum for each image channel
+    spectra = [np.abs(np.fft.fft2(img, axes=(0, 1))) for img in images]
+
+    # Average the spectra across images
+    avg_spectrum = np.mean(spectra, axis=0)
+
+    whitened_images = []
+    for img in images:
+        # Compute Fourier transform of the image channels
+        img_fft = np.fft.fft2(img, axes=(0, 1))
+
+        # Whitening in the frequency domain
+        whitened_fft = img_fft / (avg_spectrum + 1e-8)
+
+        # Transform back to the pixel domain
+        whitened_img = np.real(np.fft.ifft2(whitened_fft, axes=(0, 1)))
+
+        # Intensity scaling to match mean and standard deviation
+        whitened_mean = np.mean(whitened_img, axis=(0, 1))
+        whitened_std = np.std(whitened_img, axis=(0, 1))
+
+        whitened_img = (whitened_img - whitened_mean) * (np.std(img, axis=(0, 1)) / whitened_std) + np.mean(img, axis=(0, 1))
+        
+        whitened_img = np.clip(whitened_img, 0, 1)
+        
+        whitened_images.append(whitened_img)
+
+    return np.array(whitened_images)
+
+
+def zca_whitening(image):
+    '''
+    ZCA whitening from first principles.
+    '''
+    # Reshape the image to a 2D array
+    flattened_image = np.reshape(image, (84*84, 3))
+
+    # Compute the covariance matrix
+    cov_matrix = np.cov(flattened_image.T)
+
+    # Perform singular value decomposition (SVD) on the covariance matrix
+    U, S, V = np.linalg.svd(cov_matrix)
+
+    # Compute the ZCA whitening matrix
+    epsilon = 1e-5
+    zca_matrix = np.dot(U, np.dot(np.diag(1.0 / np.sqrt(S + epsilon)), U.T))
+
+    # Calculate the mean of the flattened image
+    mean = np.mean(flattened_image, axis=0)
+
+    # Apply the ZCA whitening transformation
+    centered_image = flattened_image - mean
+    whitened_image = np.dot(centered_image, zca_matrix.T)
+
+    # Reshape the whitened image back to the original shape
+    whitened_image = np.reshape(whitened_image, (84, 84, 3))
+
+    # Normalize the whitened image
+    whitened_image -= np.min(whitened_image)
+    whitened_image /= np.max(whitened_image)
+
+    return whitened_image
