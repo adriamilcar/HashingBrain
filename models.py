@@ -6,37 +6,18 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-'''
-def KL_div(p, q):
-    log_ = torch.where(q != 0, torch.log(p/q), torch.zeros_like(q))
-    return p*log_ + (1-p)*torch.log((1-p)/(1-q))
-'''
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hidden_constraints=[]): #, hard_sparsity=False, soft_sparsity=False, k=1, hard_sparsity_min_epochs=0):
+    def __init__(self, n_hidden=100, hidden_regularization=False):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
         Args:
             n_hidden (int; default=100): number of hidden units in the middle layer.
-            sparsity (bool; default=False): if True, sparsity of proportion k is added to the middle layer during forward pass.
-            k (float; default=1): if sparsity=True, k is the proportion of active neurons allowed at once, within the range [0,1].
         '''
         super().__init__()
 
-        '''
-        self.hard_sparsity = hard_sparsity
-        self.kth_percentile = int((1-k) * n_hidden) + 1
-        self.hard_sparsity_min_epochs = hard_sparsity_min_epochs
-        self.current_epoch = 0
-        if self.hard_sparsity_min_epochs > 0:
-            ks = np.linspace(1, k, hard_sparsity_min_epochs)
-            self.kth_percentiles = ((1-ks) * n_hidden).astype(int) + 1
-
-        self.soft_sparsity = soft_sparsity
-        self.sparsity_proportion = k            # desired: 0.12
-        '''
-        self.hidden_constraints = hidden_constraints
+        self.hidden_regularization = hidden_regularization
 
         self.n_hidden = n_hidden
         self.dim1, self.dim2 = 10, 10
@@ -73,21 +54,10 @@ class Conv_AE(nn.Module):
 
     def forward(self, x):
         h = self.encoder(x)
-        '''
-        if self.hard_sparsity:
-            if (self.current_epoch < self.hard_sparsity_min_epochs) and (self.hard_sparsity_min_epochs > 0):
-                kth = self.kth_percentiles[self.current_epoch]
-            else:
-                kth = self.kth_percentile
-            thres = torch.kthvalue(h, kth, keepdim=True)[0]
-            h = torch.where(h >= thres, h, torch.zeros_like(h))
-            h.requires_grad_(True).retain_grad()
-        '''
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, alpha=0): #, L1_lambda=0, soft_sparsity_weight=0, epoch=0):
-        #self.current_epoch = epoch
+    def backward(self, optimizer, criterion, x, y_true, alpha=0, beta=0):
 
         optimizer.zero_grad()
 
@@ -95,74 +65,66 @@ class Conv_AE(nn.Module):
 
         recon_loss = criterion(y_pred, y_true)
 
-        '''
-        # To regularize the weights instead of the activations.
-        weights = self.fc1.weight
-        Gram = torch.mm(weights, weights.t())
-        I = torch.eye(weights.shape[0], device='cuda')
-        '''
-        '''
-        # Relaxed whitening loss.
-        hidden_constraint_loss = torch.Tensor(0)
+        # Whitening loss (soft batch whitening).
+        hidden_reg_loss = 0
+        sparsity_loss = 0
         batch_size, hidden_dim = hidden.shape
-        if len(self.hidden_constraints) > 0:
-            a, b = self.hidden_constraints
-            Gram = torch.mm(hidden.t(), hidden)        # Compute the Gramian matrix of the hidden layer's activations (pairwise-correlations or similarity).
-            I = torch.eye(hidden_dim, device='cuda')   # Identity matrix.
-            #M = (a - Gram) * I + (b - Gram) * (1 - I)
-            M = a*I - Gram  # more efficient
-            hidden_constraint_loss = alpha * torch.norm(M) / (batch_size*hidden_dim)
-        '''
-        
-        # Whitening loss (batch whitening).
-        hidden_constraint_loss = 0
-        batch_size, hidden_dim = hidden.shape
-        if len(self.hidden_constraints) > 0:
+        if self.hidden_regularization:
 
             # SSCP matrix
-            M = torch.mm(hidden.t(), hidden)
+            #M = torch.mm(hidden.t(), hidden)
 
             # Covariance matrix
-            #hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
-            #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
-            '''
-            # Correlation matrix
-            column_mask = torch.all(hidden==0, dim=0)   # remove all neurons that do not activate at all.
-            hidden_clean = hidden[:, ~column_mask]
-            hidden_Z = (hidden_clean - torch.mean(hidden_clean, dim=0, keepdim=True)) / torch.std(hidden_clean, dim=0, keepdim=True)
-            M = torch.mm(hidden_Z.t(), hidden_Z) / (hidden_clean.shape[0]-1)
-            hidden_dim = hidden_clean.shape[1]
-            '''
+            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+            M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
+
             I = torch.eye(hidden_dim, device='cuda')
-            C = 0.1*I - M        # whitening --> generates spatial tuning
-            #C = M * (1 - I)  # decorrelation --> does not generate spatial tuning
-            #C = I - M * I    # standarization --> does not generate spatial tuning
-            hidden_constraint_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
+            lambda_ = 1 #0.1
+            C = lambda_*I - M   # whitening --> generates spatial tuning
+            #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
+            #C = I - M * I      # standarization --> does not generate spatial tuning
+            hidden_reg_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
         
-        '''
-        l1_penalty = L1_lambda * hidden.abs().sum() / (batch_size*hidden_dim)
+            sparsity_loss = beta * torch.norm(hidden) / (batch_size*hidden_dim)  # L1 regularization
 
-        if self.hard_sparsity:
-            sparse_mask = torch.where(hidden != 0, torch.ones_like(hidden), torch.zeros_like(hidden))
-            hidden.register_hook(lambda grad: grad * sparse_mask)
-
-        sparsity_loss = 0.
-        if self.soft_sparsity:  # sparsity penalty so that the loss increases if the fraction of units active at each datapoint deviates from a desired one (0.12).
-            #hidden_active = torch.where(hidden > 1e-3, hidden, torch.zeros_like(hidden))
-            #hidden_active_prop = torch.count_nonzero(hidden_active, axis=1) / hidden.shape[1]
-            #diff = hidden_active_prop - self.sparsity_proportion
-            #sparsity_loss = soft_sparsity_weight * torch.norm(diff)
-            mean_activation = torch.mean(hidden, dim=0)
-            sparsity_loss = soft_sparsity_weight * torch.sum(KL_div(self.sparsity_proportion, mean_activation))
-        '''
-
-        loss = recon_loss + hidden_constraint_loss #+ l1_penalty + sparsity_loss
+        loss = recon_loss + hidden_reg_loss + sparsity_loss
         loss.backward()
 
         optimizer.step()
 
         return recon_loss.item()
-    
+    '''
+    def backward(self, optimizer, criterion, x, y_true, alphas=[0,0,0,0]):
+
+        optimizer.zero_grad()
+
+        y_pred, hidden = self.forward(x)
+
+        reconstruction_loss = criterion(y_pred, y_true)
+
+        # Whitening loss (soft batch whitening).
+        decorrelation_loss = 0
+        standarization_loss = 0
+        sparsity_loss = 0
+        batch_size, hidden_dim = hidden.shape
+        if self.hidden_regularization:
+            # Covariance matrix
+            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+            M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
+            I = torch.eye(hidden_dim, device='cuda')
+            decorrelation_loss = torch.norm( M*(1 - I) )
+            standarization_loss = torch.norm(diagonal(I - M))
+            sparsity_loss = beta * torch.norm(hidden)
+
+        losses = [reconstruction_loss, decorrelation_loss, standarization_loss, sparsity_loss]
+        normed_alphas = alphas / (batch_size*hidden_dim)
+        loss = torch.dot(normed_alphas, losses)
+        loss.backward()
+
+        optimizer.step()
+
+        return reconstruction_loss.item()
+    '''
 
 class Conv_VAE(nn.Module):
     def __init__(self, n_hidden=100):
@@ -241,7 +203,7 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, L2_weight_decay=0):
+def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, L2_weight_decay=0):
                       #L1_lambda=0,  soft_sparsity_weight=0):
     '''
     TO DO.
@@ -262,8 +224,7 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning
                 inputs, _ = data
                 inputs = inputs.to('cuda')
 
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha)
-                                      # L1_lambda=L1_lambda, soft_sparsity_weight=soft_sparsity_weight, epoch=epoch)
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta)
                 running_loss += loss
 
                 pbar.update(1)
@@ -342,7 +303,7 @@ def find_max_activation_images(model, img_shape=[3, 84, 84]):
 
         for j in range(1000):
             optimizer.zero_grad()
-            _, mu, _ = model(x)
+            _, mu = model(x)
             loss = -mu[0, i]  # maximize activation of ith unit
             loss.backward()
             optimizer.step()
@@ -352,3 +313,20 @@ def find_max_activation_images(model, img_shape=[3, 84, 84]):
 
     return np.array(images)
     
+
+def extract_feature_images(model, embeddings):
+    '''
+    TO DO. Choice of the appropriate clamping value to be fixed.
+    '''
+    indxs_active = np.arange(embeddings.shape[1])[np.any(embeddings, axis=0)]
+    images = []
+    for i in np.arange(model.n_hidden)[indxs_active]:
+        input_ = torch.zeros(model.n_hidden).to('cuda')
+        activations = torch.tensor(embeddings[:,i])
+        clamp_value = torch.mean(activations[torch.nonzero(activations)])
+        input_[i] = .3
+        img = np.transpose( model.decoder(input_)[0].detach().cpu().numpy(), (1,2,0) )
+        images.append(img)
+    images = np.array(images)
+    
+    return images
