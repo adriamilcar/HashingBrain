@@ -314,19 +314,25 @@ def find_max_activation_images(model, img_shape=[3, 84, 84]):
     return np.array(images)
     
 
-def extract_feature_images(model, embeddings):
+def extract_feature_images(model, embeddings, clamping_value=None, input_dims=[84,84,3]):
     '''
-    TO DO. Choice of the appropriate clamping value to be fixed.
+    TO DO. Choice of the appropriate clamping value to be fixed --> mean doesn't seem to work well.
     '''
     indxs_active = np.arange(embeddings.shape[1])[np.any(embeddings, axis=0)]
     images = []
-    for i in np.arange(model.n_hidden)[indxs_active]:
-        input_ = torch.zeros(model.n_hidden).to('cuda')
-        activations = torch.tensor(embeddings[:,i])
-        clamp_value = torch.mean(activations[torch.nonzero(activations)])
-        input_[i] = .3
-        img = np.transpose( model.decoder(input_)[0].detach().cpu().numpy(), (1,2,0) )
-        images.append(img)
+    for i in np.arange(model.n_hidden):
+        if i in indxs_active:
+            input_ = torch.zeros(model.n_hidden).to('cuda')
+            activations = torch.tensor(embeddings[:,i])
+            clamp_value = torch.mean(activations[torch.nonzero(activations)])
+            if clamping_value != None:
+                clamp_value = clamping_value
+            input_[i] = clamp_value
+            img = np.transpose( model.decoder(input_)[0].detach().cpu().numpy(), (1,2,0) )
+            images.append(img)
+        else:
+            img = np.zeros(input_dims)
+            images.append(img)
     images = np.array(images)
     
     return images
