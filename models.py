@@ -57,7 +57,7 @@ class Conv_AE(nn.Module):
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, alpha=0, beta=0):
+    def backward(self, optimizer, criterion, x, y_true, alpha=0, beta=0, gamma=0):
 
         optimizer.zero_grad()
 
@@ -66,28 +66,35 @@ class Conv_AE(nn.Module):
         recon_loss = criterion(y_pred, y_true)
 
         # Whitening loss (soft batch whitening).
-        hidden_reg_loss = 0
+        whitening_loss = 0
         sparsity_loss = 0
+        variability_loss = 0
         batch_size, hidden_dim = hidden.shape
         if self.hidden_regularization:
 
-            # SSCP matrix
-            #M = torch.mm(hidden.t(), hidden)
+            if alpha != 0:
+                # SSCP matrix
+                M = torch.mm(hidden.t(), hidden)
 
-            # Covariance matrix
-            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
-            M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
+                # Covariance matrix
+                #hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+                #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
 
-            I = torch.eye(hidden_dim, device='cuda')
-            lambda_ = 1 #0.1
-            C = lambda_*I - M   # whitening --> generates spatial tuning
-            #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
-            #C = I - M * I      # standarization --> does not generate spatial tuning
-            hidden_reg_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
+                I = torch.eye(hidden_dim, device='cuda')
+                lambda_ = .1 #0.1
+                C = lambda_*I - M   # whitening --> generates spatial tuning
+                #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
+                #C = I - M * I      # standarization --> does not generate spatial tuning
+                whitening_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
         
-            sparsity_loss = beta * torch.norm(hidden) / (batch_size*hidden_dim)  # L1 regularization
+            if beta != 0:
+                #sparsity_loss = beta * torch.norm(hidden, 1) / (batch_size*hidden_dim)  # L1 regularization
+                sparsity_loss = beta * torch.sum(torch.abs(hidden)) / (batch_size*hidden_dim)
 
-        loss = recon_loss + hidden_reg_loss + sparsity_loss
+            if gamma != 0:
+                variability_loss = -gamma * torch.sum(torch.var(hidden, dim=0)) / hidden_dim
+
+        loss = recon_loss + whitening_loss + sparsity_loss + variability_loss
         loss.backward()
 
         optimizer.step()
@@ -203,7 +210,7 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, L2_weight_decay=0):
+def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
                       #L1_lambda=0,  soft_sparsity_weight=0):
     '''
     TO DO.
@@ -224,7 +231,7 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning
                 inputs, _ = data
                 inputs = inputs.to('cuda')
 
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta)
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta, gamma=gamma)
                 running_loss += loss
 
                 pbar.update(1)

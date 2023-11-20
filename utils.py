@@ -915,9 +915,9 @@ def image_whitening(dataset):
     return np.array(whitened_images)
 
 
-def zca_whitening(image):
+def zca_image_whitening(image):
     '''
-    ZCA whitening from first principles.
+    ZCA whitening of images from first principles.
     '''
     # Reshape the image to a 2D array
     flattened_image = np.reshape(image, (84*84, 3))
@@ -947,3 +947,15 @@ def zca_whitening(image):
     whitened_image /= np.max(whitened_image)
 
     return whitened_image
+
+
+def zca_embeddings_whitening(embeddings):
+    '''
+    ZCA whitening of embeddings from first principles.
+    '''
+    features_centered = embeddings - np.mean(embeddings, axis=0)
+    covariance_matrix = np.cov(features_centered, rowvar=False)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+    whitening_matrix = np.dot(np.dot(eigenvectors, np.diag(1.0 / np.sqrt(eigenvalues + 1e-5))), eigenvectors.T)
+    whitened_features = np.dot(features_centered, whitening_matrix)
+    return whitened_features
