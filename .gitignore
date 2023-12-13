@@ -4,3 +4,4 @@ calcium_data/
 calcium_data/event_traces_Ca2_HPC.mat 
 results/pairwise_corr_values_calcium_V1.npy 
 results/pairwise_corr_values_calcium_CA1.npy 
+ephys_data/ 
