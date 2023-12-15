@@ -959,3 +959,22 @@ def zca_embeddings_whitening(embeddings):
     whitening_matrix = np.dot(np.dot(eigenvectors, np.diag(1.0 / np.sqrt(eigenvalues + 1e-5))), eigenvectors.T)
     whitened_features = np.dot(features_centered, whitening_matrix)
     return whitened_features
+
+
+
+def get_powerlaw_exp(embeddings):
+    '''
+    TO DO.
+    '''
+    embeddings_reduced = PCA().fit(embeddings)
+    variances = embeddings_reduced.explained_variance_ratio_
+
+    cutoff_dim = 500
+    cutoff_fit = 200
+
+    x = np.arange(1, cutoff_dim+1)
+    y = variances[:cutoff_dim]
+
+    m, b = np.polyfit(np.log(x[:cutoff_fit]), np.log(y[:cutoff_fit]), 1)
+
+    return m

@@ -101,38 +101,7 @@ class Conv_AE(nn.Module):
         optimizer.step()
 
         return recon_loss.item()
-    '''
-    def backward(self, optimizer, criterion, x, y_true, alphas=[0,0,0,0]):
 
-        optimizer.zero_grad()
-
-        y_pred, hidden = self.forward(x)
-
-        reconstruction_loss = criterion(y_pred, y_true)
-
-        # Whitening loss (soft batch whitening).
-        decorrelation_loss = 0
-        standarization_loss = 0
-        sparsity_loss = 0
-        batch_size, hidden_dim = hidden.shape
-        if self.hidden_regularization:
-            # Covariance matrix
-            hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
-            M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
-            I = torch.eye(hidden_dim, device='cuda')
-            decorrelation_loss = torch.norm( M*(1 - I) )
-            standarization_loss = torch.norm(diagonal(I - M))
-            sparsity_loss = beta * torch.norm(hidden)
-
-        losses = [reconstruction_loss, decorrelation_loss, standarization_loss, sparsity_loss]
-        normed_alphas = alphas / (batch_size*hidden_dim)
-        loss = torch.dot(normed_alphas, losses)
-        loss.backward()
-
-        optimizer.step()
-
-        return reconstruction_loss.item()
-    '''
 
 class Conv_VAE(nn.Module):
     def __init__(self, n_hidden=100):
@@ -211,8 +180,7 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
-                      #L1_lambda=0,  soft_sparsity_weight=0):
+def train_autoencoder(model, train_loader, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
     '''
     TO DO.
     '''
@@ -223,8 +191,11 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning
 
     history = []
     embeddings = []
+    event_memory_scores = []
     if len(dataset) > 0:
         embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
+        if model_latent != None:
+            event_memory_scores = [ event_memories_quality(model, model_latent, dataset, clamping_value=0.4) ]
     for epoch in range(num_epochs):
         running_loss = 0.
         with tqdm(total=len(train_loader)) as pbar:
@@ -242,10 +213,12 @@ def train_autoencoder(model, train_loader, dataset=[], num_epochs=1000, learning
 
         if len(dataset) > 0:
             embeddings.append( get_latent_vectors(dataset=dataset, model=model) )
+            if model_latent != None:
+                event_memory_scores.append( event_memories_quality(model, model_latent, dataset, clamping_value=0.4) )
 
     embeddings = np.array(embeddings)
 
-    return history, embeddings
+    return history, embeddings, event_memory_scores
 
 
 def predict(image, model):
@@ -367,3 +340,4 @@ def event_memories_quality(model, model_latent, dataset, clamping_value=None, in
     mean_min_distance = distances.min(axis=1).mean()
     
     return mean_min_distance
+
