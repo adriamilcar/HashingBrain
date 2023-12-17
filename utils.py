@@ -16,6 +16,7 @@ from random import shuffle
 from PIL import Image
 import imagehash
 import cmath
+from sklearn.decomposition import PCA
 
 
 def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='pose.npy'):
@@ -971,10 +972,11 @@ def get_powerlaw_exp(embeddings):
 
     cutoff_dim = 500
     cutoff_fit = 200
+    start_fit = 0
 
     x = np.arange(1, cutoff_dim+1)
     y = variances[:cutoff_dim]
 
-    m, b = np.polyfit(np.log(x[:cutoff_fit]), np.log(y[:cutoff_fit]), 1)
+    m, b = np.polyfit(np.log(x[start_fit:cutoff_fit]), np.log(y[start_fit:cutoff_fit]), 1)
 
     return m

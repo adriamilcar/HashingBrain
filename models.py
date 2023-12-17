@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
+from utils import *
 
 
 class Conv_AE(nn.Module):
@@ -83,10 +84,10 @@ class Conv_AE(nn.Module):
 
                 I = torch.eye(hidden_dim, device='cuda')
                 lambda_ = .1 #0.1
-                C = lambda_*I - M   # whitening --> generates spatial tuning
+                C = lambda_*I - M   # orthonormality (whitening?) --> generates spatial tuning
                 #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
                 #C = I - M * I      # standarization --> does not generate spatial tuning
-                whitening_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)
+                whitening_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)   # change to /(hidden_dim**2)
         
             if beta != 0:
                 #sparsity_loss = beta * torch.norm(hidden, 1) / (batch_size*hidden_dim)  # L1 regularization
@@ -190,10 +191,15 @@ def train_autoencoder(model, train_loader, dataset=[], model_latent=None, num_ep
     model = model.to('cuda')
 
     history = []
-    embeddings = []
+    #embeddings = []
+    powerlaw_scores = []
+    intrinsic_dims = []
     event_memory_scores = []
     if len(dataset) > 0:
-        embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
+        #embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
+        embeddings = get_latent_vectors(dataset=dataset, model=model)
+        powerlaw_scores = [ get_powerlaw_exp(embeddings) ]
+        intrinsic_dims = [ intrinsic_dimensionality(embeddings, method='PCA') ]
         if model_latent != None:
             event_memory_scores = [ event_memories_quality(model, model_latent, dataset, clamping_value=0.4) ]
     for epoch in range(num_epochs):
@@ -212,13 +218,16 @@ def train_autoencoder(model, train_loader, dataset=[], model_latent=None, num_ep
         history.append(running_loss/len(train_loader))
 
         if len(dataset) > 0:
-            embeddings.append( get_latent_vectors(dataset=dataset, model=model) )
+            #embeddings.append( get_latent_vectors(dataset=dataset, model=model) )
+            embeddings = get_latent_vectors(dataset=dataset, model=model)
+            powerlaw_scores.append( get_powerlaw_exp(embeddings) )
+            intrinsic_dims.append( intrinsic_dimensionality(embeddings, method='PCA') )
             if model_latent != None:
                 event_memory_scores.append( event_memories_quality(model, model_latent, dataset, clamping_value=0.4) )
 
-    embeddings = np.array(embeddings)
+    #embeddings = np.array(embeddings)
 
-    return history, embeddings, event_memory_scores
+    return history, powerlaw_scores, intrinsic_dims, event_memory_scores
 
 
 def predict(image, model):
