@@ -14,9 +14,9 @@ def RAI(fan_in, fan_out):
     for j in range(fan_out):
         k = np.random.randint(0, high=fan_in + 1)
         V[j, k] = np.random.beta(2, 1)
-    W = V[:, :-1].T
+    W = V[:, :-1]
     b = V[:, -1]
-    return torch.from_numpy(W).float(), torch.from_numpy(b).float()
+    return W, b
 
 
 class Conv_AE(nn.Module):
@@ -46,13 +46,13 @@ class Conv_AE(nn.Module):
         self.conv5 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1, output_padding=0)
         self.conv6 = nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1, output_padding=0)
 
-        #self.apply_custom_initialization()
+        self.apply_custom_initialization()
 
     def apply_custom_initialization(self):
         fan_in, fan_out = self.fc1.weight.data.size(1), self.fc1.weight.data.size(0)
         W, b = RAI(fan_in, fan_out)
-        self.fc1.weight.data = W
-        self.fc1.bias.data = b
+        self.fc1.weight.data = torch.from_numpy(W.T).float()
+        self.fc1.bias.data = torch.from_numpy(b).float()
 
     def encoder(self, x):
         # Encoder
