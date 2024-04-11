@@ -9,6 +9,16 @@ from scipy.spatial.distance import cdist
 from utils import *
 
 
+def RAI(fan_in, fan_out):
+    V = np.random.randn(fan_out, fan_in + 1) * 0.6007 / fan_in ** 0.5
+    for j in range(fan_out):
+        k = np.random.randint(0, high=fan_in + 1)
+        V[j, k] = np.random.beta(2, 1)
+    W = V[:, :-1].T
+    b = V[:, -1]
+    return torch.from_numpy(W).float(), torch.from_numpy(b).float()
+
+
 class Conv_AE(nn.Module):
     def __init__(self, n_hidden=100, hidden_regularization=True):
         '''
@@ -35,6 +45,14 @@ class Conv_AE(nn.Module):
         self.conv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1, output_padding=1)
         self.conv5 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1, output_padding=0)
         self.conv6 = nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1, output_padding=0)
+
+        #self.apply_custom_initialization()
+
+    def apply_custom_initialization(self):
+        fan_in, fan_out = self.fc1.weight.data.size(1), self.fc1.weight.data.size(0)
+        W, b = RAI(fan_in, fan_out)
+        self.fc1.weight.data = W
+        self.fc1.bias.data = b
 
     def encoder(self, x):
         # Encoder
@@ -252,6 +270,30 @@ def predict(image, model):
     return output_img
 
 
+def get_predictions(train_loader, model, loss_criterion=nn.MSELoss()):
+
+    model.eval()
+
+    criterion = loss_criterion
+
+    all_preds = []
+    with torch.no_grad():
+        total_loss = 0.
+        for inputs, _ in train_loader:
+            inputs = inputs.to('cuda')
+
+            predictions = model(inputs)[0]
+            all_preds.append(predictions.cpu().numpy())
+
+            loss = criterion(predictions, inputs)
+            total_loss += loss.item() * inputs.size(0)
+
+    all_preds = np.concatenate(all_preds)
+    average_loss = total_loss / len(train_loader.dataset)
+
+    return all_preds, average_loss
+
+
 def get_latent_vectors(dataset, model, batch_size=256):
     '''
     Returns the latent activation vectors of the autoencoder model after passing all the images in the dataset.
@@ -349,4 +391,19 @@ def event_memories_quality(model, model_latent, dataset, clamping_value=None, in
     mean_min_distance = distances.min(axis=1).mean()
     
     return mean_min_distance
+
+
+
+def RAI(fan_in, fan_out):
+    '''
+    Randomized asymmetric initializer. It draws samples using RAI where fan_in is the number of input units in the weight
+    tensor and fan_out is the number of output units in the weight tensor.
+    '''
+    V = np.random.randn(fan_out, fan_in + 1) * 0.6007 / fan_in ** 0.5
+    for j in range(fan_out):
+        k = np.random.randint(0, high=fan_in + 1)
+        V[j, k] = np.random.beta(2, 1)
+    W = V[:, :-1].T
+    b = V[:, -1]
+    return W.astype(np.float32), b.astype(np.float32)
 
