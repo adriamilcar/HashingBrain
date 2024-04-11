@@ -41,7 +41,7 @@ class Conv_AE(nn.Module):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))  
-        x = x.view(-1, 64 * self.dim1 * self.dim2)  
+        x = x.view(-1, 64 * self.dim1 * self.dim2)
         x = F.relu(self.fc1(x))
         return x
 
