@@ -327,7 +327,7 @@ def n_active_cells(ratemaps):
     Returns:
         n_active (int): number of active units.
     '''
-    n_active = np.count_nonzero( np.any(ratemaps, axis=0) )
+    n_active = np.count_nonzero( np.any(ratemaps, axis=(1,2)) )
 
     return n_active
 
@@ -963,20 +963,42 @@ def zca_embeddings_whitening(embeddings):
 
 
 
-def get_powerlaw_exp(embeddings):
+def get_powerlaw_exp(embeddings, start_fit=0, cutoff_fit=500, cutoff_dim=None):
     '''
     TO DO.
     '''
     embeddings_reduced = PCA().fit(embeddings)
     variances = embeddings_reduced.explained_variance_ratio_
 
-    cutoff_dim = 500
-    cutoff_fit = 200
-    start_fit = 0
+    if cutoff_dim == None:
+        cutoff_dim = variances.shape[0]
 
     x = np.arange(1, cutoff_dim+1)
     y = variances[:cutoff_dim]
 
     m, b = np.polyfit(np.log(x[start_fit:cutoff_fit]), np.log(y[start_fit:cutoff_fit]), 1)
 
-    return m
+    return m, b
+
+
+def get_indxs_imgs_resp_per_unit(embeddings, active_maxprop_thres=0.8, prop_img_resp=0.2, min_act_thres=None):
+    '''
+    Returns the indexes of the dataset for which each unit strongly responds to, controlled by an activation and proportionality thresholds.
+
+    Args:
+        embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
+        active_maxprop_thres (float, default=0.5): proportion of the maximum value from which the unit is considered active or responsive.
+        prop_img_resp (float; default=0.2): maximum proportion of the dataset from which the neuron should respond to to be considered specific.
+
+    Returns:
+        indxs_embeddings_active_specific (list): list of data indexes to which every unit responds to, with variable length.
+    '''
+    embeddings_active = np.where(embeddings<active_prop_thres*embeddings.max(axis=0), 0, 1)
+    if min_act_thres != None:
+        embeddings_active = np.where(embeddings<min_act_thres, 0, 1)
+    embeddings_active_specific = embeddings_active[:, np.mean(embeddings_active, axis=0)<prop_img_resp].T
+    indxs_embeddings_active_specific = []
+    for embeddings_ in embeddings_active_specific:
+        indxs_embeddings_active_specific.append( np.nonzero(embeddings_) )
+
+    return indxs_embeddings_active_specific

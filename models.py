@@ -101,7 +101,7 @@ class Conv_AE(nn.Module):
                 #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
 
                 I = torch.eye(hidden_dim, device='cuda')
-                lambda_ = .1 #0.1
+                lambda_ = 1 #0.1
                 C = lambda_*I - M   # orthonormality (whitening?) --> generates spatial tuning
                 #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
                 #C = I - M * I      # standarization --> does not generate spatial tuning
@@ -199,11 +199,11 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
+def train_autoencoder(model, train_loader, opt=optim.Adam, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
     '''
     TO DO.
     '''
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
+    optimizer = opt(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
     criterion = nn.MSELoss()
 
     model = model.to('cuda')
@@ -356,7 +356,8 @@ def extract_feature_images(model, embeddings, clamping_value=None, input_dims=[8
         if i in indxs_active:
             input_ = torch.zeros(model.n_hidden).to('cuda')
             activations = torch.tensor(embeddings[:,i])
-            clamp_value = torch.mean(activations[torch.nonzero(activations)])
+            #clamp_value = torch.mean(activations[torch.nonzero(activations)])
+            clamp_value = torch.max(activations)
             if clamping_value != None:
                 clamp_value = clamping_value
             input_[i] = clamp_value
@@ -391,19 +392,4 @@ def event_memories_quality(model, model_latent, dataset, clamping_value=None, in
     mean_min_distance = distances.min(axis=1).mean()
     
     return mean_min_distance
-
-
-
-def RAI(fan_in, fan_out):
-    '''
-    Randomized asymmetric initializer. It draws samples using RAI where fan_in is the number of input units in the weight
-    tensor and fan_out is the number of output units in the weight tensor.
-    '''
-    V = np.random.randn(fan_out, fan_in + 1) * 0.6007 / fan_in ** 0.5
-    for j in range(fan_out):
-        k = np.random.randint(0, high=fan_in + 1)
-        V[j, k] = np.random.beta(2, 1)
-    W = V[:, :-1].T
-    b = V[:, -1]
-    return W.astype(np.float32), b.astype(np.float32)
 
