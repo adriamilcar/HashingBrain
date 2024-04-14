@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
+from scipy.ndimage.filters import gaussian_filter
 from utils import *
 
 
@@ -51,7 +52,7 @@ class Conv_AE(nn.Module):
     def apply_custom_initialization(self):
         fan_in, fan_out = self.fc1.weight.data.size(1), self.fc1.weight.data.size(0)
         W, b = RAI(fan_in, fan_out)
-        self.fc1.weight.data = torch.from_numpy(W.T).float()
+        self.fc1.weight.data = torch.from_numpy(W).float()
         self.fc1.bias.data = torch.from_numpy(b).float()
 
     def encoder(self, x):
@@ -320,28 +321,81 @@ def get_latent_vectors(dataset, model, batch_size=256):
     return latent_vectors
 
 
-def find_max_activation_images(model, img_shape=[3, 84, 84]):
+def compute_tv_beta(image, beta=2):
+    # Extract the dimensions of the image
+    H, W, _ = image.shape
+
+    # Compute the gradient differences along height (axis 0) and width (axis 1)
+    grad_i = np.diff(image, axis=0, append=image[-1:, :, :])
+    grad_j = np.diff(image, axis=1, append=image[:, -1:, :])
+
+    # Calculate the combined squared differences for the gradient
+    grad_norm_squared = (grad_i**2 + grad_j**2).sum(axis=2)
+
+    # Compute the norm V raised to the power beta/2
+    #V = (grad_norm_squared**0.5).sum()**(beta / 2)
+    V = 80 / 6.5
+
+    # Calculate scaled total variation TV_beta
+    tv_beta = (1 / (H * W * V**beta)) * (grad_norm_squared**(beta / 2)).sum()
+
+    return tv_beta
+
+
+def find_max_activation_images(model, embeddings, dataset, img_shape=[3, 84, 84], init='max', num_epochs=1000, lr=5e-2):
     '''
-    To be tested.
+    TO DO.
     '''
+    unit_indxs = np.arange(model.n_hidden)[np.any(embeddings, axis=0)]       # only units that are not silent across the dataset
+    if init == 'max':                                                        # start with image samples from the dataset that activate maximally each unit
+        img_indxs = embeddings.argmax(axis=0)[np.any(embeddings, axis=0)]  
+        init_imgs = dataset[img_indxs]
+        init_imgs = np.transpose(init_imgs, (0,3,1,2))
+    elif init == 'avg':                                                      # start with average image across dataset
+        avg_img = np.mean(dataset, axis=0)
+        init_img = np.transpose(avg_img, (2,0,1))
+    elif init == 'max_avg':
+        init_imgs = []
+        for indx in unit_indxs:
+            mask = embeddings[:,indx] > 0.8*np.max(embeddings[:,indx])
+            init_imgs.append( np.mean(dataset[mask], axis=0) )
+        init_imgs = np.transpose(init_imgs, (0,3,1,2))
+
     images = []
-    #model = model.to('cuda')
-    for i in range(model.n_hidden):
-        # Initialize input image
-        x = torch.randn(1, img_shape[0], img_shape[1], img_shape[2], device='cuda', requires_grad=True)
+    for i, indx in enumerate(unit_indxs):
+        if init == 'max' or init == 'max_avg':
+            init_img = init_imgs[i]
+        elif init == 'rand':
+            init_img = torch.randn(1, img_shape[0], img_shape[1], img_shape[2])
 
-        # Use optimizer to perform gradient ascent
-        optimizer = optim.Adam([x], lr=1e-3)
+        x = torch.Tensor(init_img).to('cuda')
+        x.requires_grad = True
 
-        for j in range(1000):
-            optimizer.zero_grad()
-            _, mu = model(x)
-            loss = -mu[0, i]  # maximize activation of ith unit
-            loss.backward()
-            optimizer.step()
+        optimizer = optim.Adam([x], lr=lr)
 
-        # Add image to list
-        images.append(x.detach().cpu().numpy()[0, 0])
+        std = 3
+        with tqdm(total=num_epochs) as pbar:
+            for j in range(num_epochs):
+                optimizer.zero_grad()
+
+                x.data = torch.Tensor(gaussian_filter(x.detach().data.cpu().numpy(), std)).to('cuda')  # blurring with exponential decay over training
+
+                h = model.encoder(x)
+
+                tv_loss = torch.tensor(compute_tv_beta(x.detach().data.cpu().numpy())).to('cuda')
+                loss = -h[0, indx] + torch.sum(h[0, torch.arange(h.size(1)) != indx]) + tv_loss     # maximize activation of ith unit and minimize all the other units' activity.
+                loss.backward()
+                optimizer.step()
+
+                x.data = torch.clamp(x.data, min=0, max=1)  # make sure optimized images stay within range [0,1]
+
+                std *= 1/(j+1)
+
+                pbar.update(1)
+                pbar.set_description(f"Unit {i+1}/{len(unit_indxs)}, Loss: {loss.item():.4f}")
+
+        optimized_img = np.transpose( x.detach().cpu().numpy(), (1,2,0))
+        images.append(optimized_img)
 
     return np.array(images)
     
