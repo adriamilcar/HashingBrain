@@ -1169,19 +1169,19 @@ def build_hulls(embeddings, images_2d, max_act_thres=0.8):
         list: A list of polygons representing the convex hulls for plotting.
     '''
 
-    # Determine the number of active features
+    # Determine the number of active units
     n_active_units = np.count_nonzero(np.any(embeddings, axis=0))
 
     # Generate a binary activation matrix based on the threshold
     embeddings_active = np.where(embeddings < max_act_thres * embeddings.max(axis=0), 0, 1)
 
-    # Exclude features where all samples are active
-    active_feature_filter = np.mean(embeddings_active, axis=0) < 1
-    embeddings_active_specific = embeddings_active[:, active_feature_filter].T
+    # Exclude units where all samples are active
+    active_unit_filter = np.mean(embeddings_active, axis=0) < 1
+    embeddings_active_specific = embeddings_active[:, active_unit_filter].T
 
     # Collect indices of active samples for each feature
     indxs_embeddings_active_specific = [
-        np.nonzero(feature_activations)[0] for feature_activations in embeddings_active_specific
+        np.nonzero(unit_activations)[0] for unit_activations in embeddings_active_specific
     ]
 
     # Clustering and convex hull creation
