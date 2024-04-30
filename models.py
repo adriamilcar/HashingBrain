@@ -21,7 +21,7 @@ def RAI(fan_in, fan_out):
 
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hidden_regularization=True):
+    def __init__(self, n_hidden=100, hidden_regularization=True, weight_init='RAI'):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
@@ -47,7 +47,10 @@ class Conv_AE(nn.Module):
         self.conv5 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1, output_padding=0)
         self.conv6 = nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1, output_padding=0)
 
-        self.apply_custom_initialization()
+        if weight_init == 'RAI':
+            self.apply_custom_initialization()
+        else:
+            pass
 
     def apply_custom_initialization(self):
         fan_in, fan_out = self.fc1.weight.data.size(1), self.fc1.weight.data.size(0)

@@ -7,7 +7,8 @@ from scipy.spatial.distance import cdist
 from scipy.stats import spearmanr, pearsonr
 from scipy.signal import correlate2d
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torchvision import models, transforms
+from torch.utils.data import DataLoader, TensorDataset, Dataset
 from sklearn.linear_model import LinearRegression
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import AffinityPropagation
@@ -17,6 +18,14 @@ from PIL import Image
 import imagehash
 import cmath
 from sklearn.decomposition import PCA
+import clip
+from sklearn.manifold import TSNE, MDS
+import umap
+from sklearn.cluster import DBSCAN
+from scipy.spatial import ConvexHull
+from shapely.geometry import Polygon
+from itertools import combinations
+
 
 
 def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='pose.npy'):
@@ -1024,3 +1033,182 @@ def get_indxs_imgs_resp_per_unit(embeddings, active_maxprop_thres=0.8, prop_img_
         indxs_embeddings_active_specific.append( np.nonzero(embeddings_) )
 
     return indxs_embeddings_active_specific
+
+
+def encode_images(dataset, network='CLIP'):
+    '''
+    Encodes a dataset of images using a specified neural network. The function supports
+    encoding through three different networks: CLIP, VGG-16, and Inception V3. It handles
+    image preprocessing, model loading, and feature extraction, returning a numpy array
+    of encoded features.
+
+    Args:
+        dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) or
+                                  shape (n_samples, n_pixels_height, n_pixels_width, n_channels). Values can be in the ranges
+                                  [0,1] or [0,255].
+        network (str, default='CLIP'): The name of the network to use for encoding. Supported values are 'CLIP', 'VGG', and 'Inception'.
+
+    Returns:
+        numpy.ndarray: An array of encoded features. Each row corresponds to the features
+                       extracted from an image.
+
+    Raises:
+        ValueError: If the specified network is not supported.
+    '''
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Setup model and transformations based on the selected network
+    if network == 'CLIP':
+        model, preprocess = clip.load('ViT-B/32', device=device)
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073], std=[0.26862954, 0.26130258, 0.27577711])
+        ])
+    elif network == 'VGG':
+        model = models.vgg16(pretrained=True)
+        model.classifier[6] = torch.nn.Identity()
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif network == 'Inception':
+        model = models.inception_v3(pretrained=True, aux_logits=True)
+        model.fc = torch.nn.Identity()
+        transform = transforms.Compose([
+            transforms.Resize((299, 299)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    else:
+        raise ValueError("Unsupported network type specified.")
+
+    model.eval()
+    model.to(device)
+
+    class ImageDataset(Dataset):
+        def __init__(self, images, transform):
+            self.images = images
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.images)
+
+        def __getitem__(self, idx):
+            image = self.images[idx]
+            image = Image.fromarray((image * 255).astype(np.uint8)) if image.dtype != np.uint8 else Image.fromarray(image)
+            image = self.transform(image)
+            return image
+
+    # Create dataset and dataloader
+    batch_size = 64
+    dataset = ImageDataset(dataset, transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    # Extract features
+    features = []
+    with torch.no_grad():
+        for images in dataloader:
+            images = images.to(device)
+            if network == 'CLIP':
+                outputs = model.encode_image(images)
+            else:
+                outputs = model(images)
+            features.extend(outputs.cpu().numpy())
+
+    return np.array(features)
+
+
+def reduce_dimensionality(features, method='UMAP'):
+    '''
+    Reduces the dimensionality of the given feature matrix to 2D using specified method.
+
+    Parameters:
+    - features (2D numpy array): The high-dimensional feature matrix to reduce.
+    - method (str): The dimensionality reduction method to use ('UMAP', 'TSNE', 'MDS').
+                     Default is 'UMAP'.
+
+    Returns:
+    - reduced (2D numpy array): A 2D array where each row represents the 2D projection of the corresponding
+                     high-dimensional feature.
+
+    Raises:
+    - ValueError: If an unsupported method is specified.
+    '''
+    reduced = []
+    if method.upper() == 'TSNE':
+        # t-SNE
+        tsne = TSNE(n_components=2)
+        reduced = tsne.fit_transform(features)
+    elif method.upper() == 'MDS':
+        # MDS
+        mds = MDS(n_components=2)
+        reduced = mds.fit_transform(features)
+    elif method.upper() == 'UMAP':
+        # UMAP
+        umap_fit = umap.UMAP(n_components=2, n_neighbors=10, min_dist=0.1)
+        reduced = umap_fit.fit_transform(features)
+    else:
+        raise ValueError("Unsupported method: {}. Use 'UMAP', 'TSNE', or 'MDS'.".format(method))
+
+    return reduced
+
+
+def build_hulls(embeddings, images_2d, max_act_thres=0.8):
+    '''
+    Analyze feature activations to determine clusters and calculate overlap metrics.
+    
+    Parameters:
+        embeddings (np.array): The embedding matrix with shape (n_samples, n_features).
+        images_2d (np.array): The 2D coordinates of samples with shape (n_samples, 2).
+        max_act_thres (float, default=0.8): Proportionality threshold for activation.
+    
+    Returns:
+        float: The average overlap metric for all convex hulls.
+        list: A list of polygons representing the convex hulls for plotting.
+    '''
+
+    # Determine the number of active features
+    n_active_units = np.count_nonzero(np.any(embeddings, axis=0))
+
+    # Generate a binary activation matrix based on the threshold
+    embeddings_active = np.where(embeddings < max_act_thres * embeddings.max(axis=0), 0, 1)
+
+    # Exclude features where all samples are active
+    active_feature_filter = np.mean(embeddings_active, axis=0) < 1
+    embeddings_active_specific = embeddings_active[:, active_feature_filter].T
+
+    # Collect indices of active samples for each feature
+    indxs_embeddings_active_specific = [
+        np.nonzero(feature_activations)[0] for feature_activations in embeddings_active_specific
+    ]
+
+    # Clustering and convex hull creation
+    hull_polygons = []
+    for img_indxs in indxs_embeddings_active_specific:
+        points = images_2d[img_indxs]
+        clustering = DBSCAN(eps=1, min_samples=4).fit(points)
+        labels = clustering.labels_
+        
+        for k in set(labels):
+            if k != -1:
+                cluster_points = points[labels == k]
+                if len(cluster_points) >= 3:
+                    hull = ConvexHull(cluster_points)
+                    polygon = Polygon(cluster_points[hull.vertices])
+                    hull_polygons.append(polygon)
+
+    # Calculate the average Intersection over Union (IoU) for all pairs of convex hulls
+    total_intersection_over_union = 0
+    pair_count = 0
+    for i, j in combinations(range(len(hull_polygons)), 2):
+        intersection = hull_polygons[i].intersection(hull_polygons[j]).area
+        union = hull_polygons[i].union(hull_polygons[j]).area
+        total_intersection_over_union += intersection / union if union > 0 else 0
+        pair_count += 1
+
+    average_overlap_metric = total_intersection_over_union / pair_count if pair_count > 0 else 0
+    
+    return average_overlap_metric, hull_polygons
+
