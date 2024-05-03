@@ -49,7 +49,7 @@ def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='p
             filepath = os.path.join(directory, filename)
             if file_format == '.npy':
                 image = np.load(filepath)
-            elif file_format == '.jpg':
+            elif file_format == '.jpg' or file_format == '.png':
                 image = cv2.imread(filepath)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             images.append(image)
@@ -61,7 +61,16 @@ def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='p
     ## Load pose (position and orientation).
     pose = []
     if load_pose:
-        pose = np.load(directory+'/'+pose_filename)
+        if pose_filename in os.listdir(directory):
+            pose = np.load(directory+'/'+pose_filename)
+        else:
+            pos_directory = directory+'/pos'
+            for i, filename in enumerate(os.listdir(pos_directory)):
+                filepath = os.path.join(pos_directory, filename)
+                pos = np.load(filepath).tolist()
+                pose.append(pos)
+
+    pose = np.array(pose)
 
     return images, pose
 
