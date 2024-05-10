@@ -190,18 +190,21 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
         for ii, c in enumerate(embeddings[:,i]):
             indx_x = pos_imgs_norm[ii,0]
             indx_y = pos_imgs_norm[ii,1]
-            #ratemaps[i, indx_x, indx_y] += c
             ratemap_[indx_x, indx_y] += c
+
+        if len(occupancy_map) > 0:
+            ratemaps[i] = ratemaps[i]/occ_prob
+
         ratemaps[i] = np.pad(ratemap_, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
         if np.any(ratemaps[i]):
-            ratemaps[i] = np.abs(ratemaps[i])
-            ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
+            #ratemaps[i] = np.abs(ratemaps[i])
+            #ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemap_filtered_Gaussian(ratemaps[i], filter_width)
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemaps[i].T
-            if len(occupancy_map) > 0:
-                ratemaps[i] = ratemaps[i]/occ_prob
-                ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
+            #if len(occupancy_map) > 0:
+                #ratemaps[i] = ratemaps[i]/occ_prob
+                #ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
         
     return ratemaps
 
@@ -307,7 +310,7 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         sizes = []
         for k in clusters_labels_:
             n_bins = np.where(clusterd_matrix_ == k)[0].size
-            sizes.append(n_bins)
+            sizes.append(n_bins/total_area)
 
         all_sizes += sizes
     
@@ -1021,27 +1024,28 @@ def get_powerlaw_exp(embeddings, start_fit=0, cutoff_fit=500, cutoff_dim=None):
     return m, b
 
 
-def get_indxs_imgs_resp_per_unit(embeddings, active_maxprop_thres=0.8, prop_img_resp=0.2, min_act_thres=None):
+def get_indxs_imgs_max_activity(embeddings, max_act_thres=0.8):
     '''
     Returns the indexes of the dataset for which each unit strongly responds to, controlled by an activation and proportionality thresholds.
 
     Args:
         embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
-        active_maxprop_thres (float, default=0.5): proportion of the maximum value from which the unit is considered active or responsive.
-        prop_img_resp (float; default=0.2): maximum proportion of the dataset from which the neuron should respond to to be considered specific.
+        max_act_thres (float, default=0.5): proportion of the maximum value from which the unit is considered active or responsive.
 
     Returns:
-        indxs_embeddings_active_specific (list): list of data indexes to which every unit responds to, with variable length.
+        indxs (list): list of data indexes to which every unit responds to, with variable length.
     '''
-    embeddings_active = np.where(embeddings<active_prop_thres*embeddings.max(axis=0), 0, 1)
-    if min_act_thres != None:
-        embeddings_active = np.where(embeddings<min_act_thres, 0, 1)
-    embeddings_active_specific = embeddings_active[:, np.mean(embeddings_active, axis=0)<prop_img_resp].T
-    indxs_embeddings_active_specific = []
-    for embeddings_ in embeddings_active_specific:
-        indxs_embeddings_active_specific.append( np.nonzero(embeddings_) )
+    # Generate a binary activation matrix based on the threshold
+    embeddings_active = np.where(embeddings < max_act_thres * embeddings.max(axis=0), 0, 1)
 
-    return indxs_embeddings_active_specific
+    # Exclude units where all samples are active
+    active_unit_filter = np.mean(embeddings_active, axis=0) < 1
+    embeddings_active_specific = embeddings_active[:, active_unit_filter].T
+
+    # Collect indices of active samples for each feature
+    indxs = [ np.nonzero(unit_activations)[0] for unit_activations in embeddings_active_specific ]
+
+    return indxs
 
 
 def encode_images(dataset, network='CLIP'):
@@ -1181,21 +1185,12 @@ def build_hulls(embeddings, images_2d, max_act_thres=0.8):
     # Determine the number of active units
     n_active_units = np.count_nonzero(np.any(embeddings, axis=0))
 
-    # Generate a binary activation matrix based on the threshold
-    embeddings_active = np.where(embeddings < max_act_thres * embeddings.max(axis=0), 0, 1)
-
-    # Exclude units where all samples are active
-    active_unit_filter = np.mean(embeddings_active, axis=0) < 1
-    embeddings_active_specific = embeddings_active[:, active_unit_filter].T
-
-    # Collect indices of active samples for each feature
-    indxs_embeddings_active_specific = [
-        np.nonzero(unit_activations)[0] for unit_activations in embeddings_active_specific
-    ]
+    # Get indexes of images that most strongly activate each unit.
+    indxs = get_indxs_imgs_max_activity(embeddings, max_act_thres=max_act_thres)
 
     # Clustering and convex hull creation
     hull_polygons = []
-    for img_indxs in indxs_embeddings_active_specific:
+    for img_indxs in indxs:
         points = images_2d[img_indxs]
         clustering = DBSCAN(eps=1, min_samples=4).fit(points)
         labels = clustering.labels_

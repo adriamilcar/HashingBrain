@@ -403,22 +403,28 @@ def find_max_activation_images(model, embeddings, dataset, img_shape=[3, 84, 84]
     return np.array(images)
     
 
-def extract_feature_images(model, embeddings, clamping_value=None, input_dims=[84,84,3]):
+def extract_feature_images(model, embeddings, clamping_value='max_unit', input_dims=[84,84,3]):
     '''
-    TO DO. Choice of the appropriate clamping value to be fixed --> mean doesn't seem to work well.
+    TO DO.
     '''
     indxs_active = np.arange(embeddings.shape[1])[np.any(embeddings, axis=0)]
     images = []
+
+    # Precompute the clamp_value for 'mean' mode to be used for all active units
+    if clamping_value == 'mean':
+        activations = torch.tensor(embeddings)
+        max_values = torch.max(activations, dim=0)[0]
+        clamp_value = torch.mean(max_values).item()  # Get a Python float for consistent use in all units
+
     for i in np.arange(model.n_hidden):
         if i in indxs_active:
             input_ = torch.zeros(model.n_hidden).to('cuda')
-            activations = torch.tensor(embeddings[:,i])
-            #clamp_value = torch.mean(activations[torch.nonzero(activations)])
-            clamp_value = torch.max(activations)
-            if clamping_value != None:
-                clamp_value = clamping_value
+            if clamping_value == 'max_unit':
+                activations = torch.tensor(embeddings[:,i])
+                clamp_value = torch.max(activations).item()  # Get a Python float for this specific unit
+
             input_[i] = clamp_value
-            img = np.transpose( model.decoder(input_)[0].detach().cpu().numpy(), (1,2,0) )
+            img = np.transpose(model.decoder(input_)[0].detach().cpu().numpy(), (1, 2, 0))
             images.append(img)
         else:
             img = np.zeros(input_dims)
@@ -426,6 +432,7 @@ def extract_feature_images(model, embeddings, clamping_value=None, input_dims=[8
     images = np.array(images)
     
     return images
+
 
 
 def event_memories_quality(model, model_latent, dataset, clamping_value=None, input_dims=[84,84,3]):
