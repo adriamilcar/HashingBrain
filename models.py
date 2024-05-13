@@ -252,7 +252,8 @@ def train_autoencoder_old(model, train_loader, opt=optim.Adam, dataset=[], model
     return history, powerlaw_scores, intrinsic_dims, event_memory_scores
 
 
-def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim.Adam, num_epochs=1000, learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0):
+def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim.Adam, num_epochs=1000, 
+                      learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0, loss_threshold=None):
     '''
     Train an autoencoder and compute custom metrics during training.
 
@@ -265,6 +266,7 @@ def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim
         learning_rate (float): Learning rate for the optimizer.
         alpha, beta, gamma (float): Custom hyperparameters for loss regularization.
         L2_weight_decay (float): Weight decay for L2 regularization.
+        loss_threshold (float, optional): If provided, training will stop early if the loss drops below this value.
 
     Returns:
         results (dict): A dictionary containing lists of metrics recorded during training including loss.
@@ -289,6 +291,11 @@ def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim
 
         avg_loss = running_loss / len(train_loader)
         results['loss'].append(avg_loss)
+
+        # Early stopping condition
+        if loss_threshold is not None and avg_loss < loss_threshold:
+            print(f"Stopping early at epoch {epoch+1} as loss {avg_loss:.4f} is below the threshold {loss_threshold:.4f}.")
+            break
 
         # Evaluate the model with each function in eval_functions.
         if len(eval_functions) > 0:
