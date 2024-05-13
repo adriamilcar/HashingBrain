@@ -203,7 +203,7 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder(model, train_loader, opt=optim.Adam, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
+def train_autoencoder_old(model, train_loader, opt=optim.Adam, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
     '''
     TO DO.
     '''
@@ -252,21 +252,22 @@ def train_autoencoder(model, train_loader, opt=optim.Adam, dataset=[], model_lat
     return history, powerlaw_scores, intrinsic_dims, event_memory_scores
 
 
-def train_autoencoder_v2(model, train_loader, eval_functions, opt=optim.Adam, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0):
+def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim.Adam, num_epochs=1000, learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0):
     '''
     Train an autoencoder and compute custom metrics during training.
 
     Args:
-        model (torch.nn.Module): The neural network model to train.
+        model (torch.nn.Module): The autoencoder model.
         train_loader (DataLoader): DataLoader for training data.
+        dataset (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width).
         eval_functions (list): A list of functions to evaluate the model's performance periodically.
         num_epochs (int): Number of epochs to train.
         learning_rate (float): Learning rate for the optimizer.
-        alpha, beta, gamma (float): Custom hyperparameters for loss adjustment.
+        alpha, beta, gamma (float): Custom hyperparameters for loss regularization.
         L2_weight_decay (float): Weight decay for L2 regularization.
 
     Returns:
-        dict: A dictionary containing lists of metrics recorded during training including loss.
+        results (dict): A dictionary containing lists of metrics recorded during training including loss.
     '''
     optimizer = opt(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
     criterion = nn.MSELoss()
@@ -275,26 +276,28 @@ def train_autoencoder_v2(model, train_loader, eval_functions, opt=optim.Adam, da
     results.update({func.__name__: [] for func in eval_functions})
 
     for epoch in range(num_epochs):
-        running_loss = 0.0
+        running_loss = 0.
         model.train()
         with tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}") as pbar:
             for inputs, _ in train_loader:
                 inputs = inputs.to('cuda')
                 loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta, gamma=gamma)
-                running_loss += loss.item()
-                pbar.update(1)
+                running_loss += loss
 
-        # Record the average loss of this epoch.
+                pbar.update(1)
+                pbar.set_description(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}")
+
         avg_loss = running_loss / len(train_loader)
         results['loss'].append(avg_loss)
-        pbar.set_description(f"Loss: {avg_loss:.4f}")
 
         # Evaluate the model with each function in eval_functions.
-        model.eval()
-        with torch.no_grad():
-            for func in eval_functions:
-                result = func(model)
-                results[func.__name__].append(result)
+        if len(eval_functions) > 0:
+            model.eval()
+            with torch.no_grad():
+                embeddings = get_latent_vectors(dataset=dataset, model=model)
+                for func in eval_functions:
+                    result = func(embeddings=embeddings)
+                    results[func.__name__].append(result)
 
     return results
 
@@ -321,8 +324,18 @@ def predict(image, model):
     return output_img
 
 
-def get_predictions(train_loader, model, loss_criterion=nn.MSELoss()):
+def get_predictions(model, train_loader, loss_criterion=nn.MSELoss()):
+    '''
+    Computes the average loss function of the model over the dataset contained in train_loader.
 
+    Args:
+        model (torch.nn.Module): The autoencoder model.
+        train_loader (DataLoader): DataLoader containing the samples used for training.
+        loss_criterion (torch.nn.Loss): loss function used to compute the score.
+
+    Returns:
+        average_loss (float): returns the average loss over the whole dataset.
+    '''
     model.eval()
 
     criterion = loss_criterion
