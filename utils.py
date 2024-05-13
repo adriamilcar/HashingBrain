@@ -28,24 +28,24 @@ from itertools import combinations
 
 
 
-def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='pose.npy'):
+def load_dataset(directory, task, file_format='.npy', load_position=True, position_filename='position.npy'):
     '''
     Loads all .npy or .jpg images and the pose data per image from a given directory.
 
     Args:
         directory (str): path to the images to be loaded.
         file_format (str): format of the images. Accepted formats are .npy and .jpg.
-        load_pose (bool): if True, it will also load the pose data.
-        pose_filename (str): name of the file with the pose data. The accepted format is .npy.
+        load_position (bool): if True, it will also load the pose data.
+        position_filename (str): name of the file with the pose data. The accepted format is .npy.
 
     Returns:
         images (4D numpy array): image dataset with shape (n_samples, n_channels, n_pixels_height, n_pixels_width) and normalized values [0,1].
-        pose (2D numpy array): pose data with (x,y) coordinates and angle (in degrees; [0,360]), wit shape (n_samples, 3).
+        position (2D numpy array): pose data with (x,y) coordinates and angle (in degrees; [0,360]), wit shape (n_samples, 3).
     '''
     ## Load images.
     images = []
     for i, filename in enumerate(os.listdir(directory)):
-        if filename.endswith(file_format) and filename != pose_filename:
+        if filename.endswith(file_format) and filename != position_filename:
             filepath = os.path.join(directory, filename)
             if file_format == '.npy':
                 image = np.load(filepath)
@@ -58,21 +58,25 @@ def load_dataset(directory, file_format='.npy', load_pose=True, pose_filename='p
     if np.max(images) > 1:   # normalize to [0,1] if values are RGB [0,255].
         images = images/255.
 
-    ## Load pose (position and orientation).
-    pose = []
-    if load_pose:
-        if pose_filename in os.listdir(directory):
-            pose = np.load(directory+'/'+pose_filename)
+    ## Load position.  
+    position = []
+    if load_position:
+        if position_filename in os.listdir(directory):
+            position = np.load(directory+'/'+position_filename)
         else:
             pos_directory = directory+'/pos'
             for i, filename in enumerate(os.listdir(pos_directory)):
                 filepath = os.path.join(pos_directory, filename)
                 pos = np.load(filepath).tolist()
-                pose.append(pos)
+                position.append(pos)
 
-    pose = np.array(pose)
+    pos_cols = (0,2)
+    if task == 'openArena':
+        pos_cols = (0,1)
 
-    return images, pose
+    position = np.array(position)[:, pos_cols]
+
+    return images, position
 
 
 def load_pose_data_from_csv(path):
@@ -144,7 +148,7 @@ def ratemap_filtered_Gaussian(ratemap, std=2):
     return new_ratemap
 
 
-def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], n_bins_padding=0):
+def ratemaps(embeddings, position, n_bins=50, filter_width=3, occupancy_map=[], n_bins_padding=0):
     '''
     Creates smooth ratemaps from latent embeddings (activity) and spatial position through time.
 
@@ -180,8 +184,6 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
     pos_imgs_norm *= n_bins-1
     pos_imgs_norm = pos_imgs_norm.round(0).astype(int)
 
-    occ_prob = occupancy_map/np.sum(occupancy_map)
-
     # Add activation values to each cell in the ratemap and adds Gaussian smoothing.
     n_latent = embeddings.shape[1]
     ratemaps = np.zeros((n_latent, int(n_bins+2*n_bins_padding), int(n_bins+2*n_bins_padding)))
@@ -193,18 +195,15 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=2, occupancy_map=[], 
             ratemap_[indx_x, indx_y] += c
 
         if len(occupancy_map) > 0:
-            ratemaps[i] = ratemaps[i]/occ_prob
+            ratemap_ = np.divide(ratemap_, occupancy_map, out=np.zeros_like(ratemap_), where=occupancy_map!=0)
+            #ratemap_ = ratemap_/occupancy_map
 
         ratemaps[i] = np.pad(ratemap_, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
         if np.any(ratemaps[i]):
-            #ratemaps[i] = np.abs(ratemaps[i])
-            #ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
+            ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemap_filtered_Gaussian(ratemaps[i], filter_width)
             ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
             ratemaps[i] = ratemaps[i].T
-            #if len(occupancy_map) > 0:
-                #ratemaps[i] = ratemaps[i]/occ_prob
-                #ratemaps[i] = ratemaps[i]/np.max(ratemaps[i])
         
     return ratemaps
 
@@ -235,54 +234,52 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         ## Params.
         total_area = ratemap.shape[0]*ratemaps.shape[1]
         cluster_min = total_area*min_pix_cluster  #50
-        cluster_max = total_area*max_pix_cluster #1250
+        cluster_max = total_area*max_pix_cluster  #1250
         
         ## Clustering.
         ratemap[ratemap <  ratemap.max()*active_threshold] = 0
         ratemap[ratemap >= ratemap.max()*active_threshold] = 1
 
-        visited_matrix  = np.zeros_like(ratemap)
-
         # First pass of clustering.
-        clusterd_matrix = np.zeros_like(ratemap)
+        clustered_matrix = np.zeros_like(ratemap)
         current_cluster = 1
 
-        # go through every bin in the ratemap.
+        # Go through every bin in the ratemap.
         for yy in range(1,ratemap.shape[0]-1):
             for xx in range(1,ratemap.shape[1]-1):
                 if ratemap[  yy, xx ] == 1:
-                    # go through every bin around this bin.
+                    # Go through every bin around this bin.
                     for ty in range(-1,2):
                         for tx in range(-1,2):
-                            if clusterd_matrix[ yy+ty, xx+tx ] != 0:
-                                clusterd_matrix[ yy,xx ] = clusterd_matrix[ yy+ty, xx+tx ]
+                            if clustered_matrix[ yy+ty, xx+tx ] != 0:
+                                clustered_matrix[ yy,xx ] = clustered_matrix[ yy+ty, xx+tx ]
 
-                    if clusterd_matrix[ yy, xx ] == 0:
-                        clusterd_matrix[ yy, xx ] = current_cluster
+                    if clustered_matrix[ yy, xx ] == 0:
+                        clustered_matrix[ yy, xx ] = current_cluster
                         current_cluster += 1
                         
         # Refine clustering: neighbour bins to same cluster number.
-        for yy in range(1,clusterd_matrix.shape[0]-1):
-            for xx in range(1,clusterd_matrix.shape[1]-1):
-                if clusterd_matrix[  yy, xx ] != 0:
+        for yy in range(1,clustered_matrix.shape[0]-1):
+            for xx in range(1,clustered_matrix.shape[1]-1):
+                if clustered_matrix[  yy, xx ] != 0:
                     # go through every bin around this bin.
                     for ty in range(-1,2):
                         for tx in range(-1,2):
-                            if clusterd_matrix[ yy+ty, xx+tx ] != 0:
-                                if clusterd_matrix[ yy+ty, xx+tx ] != clusterd_matrix[  yy, xx ]:
-                                    clusterd_matrix[ yy+ty, xx+tx ] = clusterd_matrix[  yy, xx ]
+                            if clustered_matrix[ yy+ty, xx+tx ] != 0:
+                                if clustered_matrix[ yy+ty, xx+tx ] != clustered_matrix[  yy, xx ]:
+                                    clustered_matrix[ yy+ty, xx+tx ] = clustered_matrix[  yy, xx ]
                   
         ## Quantify number of place fields.
-        clusters_labels = np.delete(np.unique(clusterd_matrix), np.where(  np.unique(clusterd_matrix) == 0 ) )
+        clusters_labels = np.delete(np.unique(clustered_matrix), np.where(  np.unique(clustered_matrix) == 0 ) )
         n_place_fields_counter = 0
-        clusterd_matrix_ = np.copy(clusterd_matrix)
+        clustered_matrix_ = np.copy(clustered_matrix)
         clusters_labels_ = np.copy(clusters_labels)
         for k in range(clusters_labels.size):
-            n_bins = np.where(clusterd_matrix == clusters_labels[k])[0].size
+            n_bins = np.where(clustered_matrix == clusters_labels[k])[0].size
             if cluster_min <= n_bins <= cluster_max:
                 n_place_fields_counter += 1
             else:
-                clusterd_matrix_[np.where(clusterd_matrix_==clusters_labels[k])] = 0
+                clustered_matrix_[np.where(clustered_matrix_==clusters_labels[k])] = 0
                 clusters_labels_ = np.delete(clusters_labels_, np.where(clusters_labels_ == clusters_labels[k]) )
 
         all_num_fields.append(n_place_fields_counter)
@@ -291,17 +288,15 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         centroids = []
         for k in clusters_labels_:
             if peak_as_centroid:  # compute centroid as the peak of the place field.
-                x, y = np.unravel_index(np.argmax( r * (clusterd_matrix_==k) ), r.shape)
-                #x = np.argmax(  r * (clusterd_matrix_==k) ) 
-                #y = np.argmax(  r * (clusterd_matrix_==k) )
-            else:  # compute the centroid as weighted sum ('center of mass').
-                w_x = r[np.where(clusterd_matrix_==k)[0], :].sum(axis=1)
+                x, y = np.unravel_index(np.argmax( r * (clustered_matrix_==k) ), r.shape)
+            else:                 # compute the centroid as weighted sum ('center of mass').
+                w_x = r[np.where(clustered_matrix_==k)[0], :].sum(axis=1)
                 w_x = w_x/w_x.sum()
-                x = np.sum(w_x * np.where(clusterd_matrix_==k)[0])
+                x = np.sum(w_x * np.where(clustered_matrix_==k)[0])
                 
-                w_y = r[:, np.where(clusterd_matrix_==k)[1]].sum(axis=0)
+                w_y = r[:, np.where(clustered_matrix_==k)[1]].sum(axis=0)
                 w_y = w_y/w_y.sum()
-                y = np.sum(w_y * np.where(clusterd_matrix_==k)[1])
+                y = np.sum(w_y * np.where(clustered_matrix_==k)[1])
             centroids.append([x,y])
 
         all_centroids += centroids
@@ -309,7 +304,7 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
         ## Compute sizes of place fields.
         sizes = []
         for k in clusters_labels_:
-            n_bins = np.where(clusterd_matrix_ == k)[0].size
+            n_bins = np.where(clustered_matrix_ == k)[0].size
             sizes.append(n_bins/total_area)
 
         all_sizes += sizes
@@ -330,7 +325,7 @@ def prop_cells_with_place_fields(ratemaps, min_pix_cluster=0.02, max_pix_cluster
     Returns:
         prop_cells (float): proportion of active units that have one or more place fields, within the range [0,1].
     '''
-    all_num_fields = stats_place_fields(ratemaps=clean_ratemaps(ratemaps), min_pix_cluster=min_pix_cluster, 
+    all_num_fields, _, _ = stats_place_fields(ratemaps=clean_ratemaps(ratemaps), min_pix_cluster=min_pix_cluster, 
                                         max_pix_cluster=max_pix_cluster, active_threshold=active_threshold)[0]
 
     prop_cells = np.count_nonzero(all_num_fields) / all_num_fields.shape[0]
@@ -338,17 +333,17 @@ def prop_cells_with_place_fields(ratemaps, min_pix_cluster=0.02, max_pix_cluster
     return prop_cells
 
 
-def n_active_cells(ratemaps):
+def n_active_cells(embeddings):
     '''
     Computes the number of units that have at least some activity (non-silent).
     
     Args:
-        ratemaps (3D numpy array): 3D matrix containing the ratemaps associated to all embedding units, with 
-                                   shape (n_latent, n_bins, n_bins).
+        embeddings (2D numpy array): 2D matrix latent embeddings through time, with shape (n_samples, n_latent).
+
     Returns:
         n_active (int): number of active units.
     '''
-    n_active = np.count_nonzero( np.any(ratemaps, axis=(1,2)) )
+    n_active = np.count_nonzero(np.any(embeddings, axis=0))
 
     return n_active
 
@@ -538,7 +533,7 @@ def hamming_dist_matrix(hashes):
     return hash_diffs, similarity_matrix
 
 
-def occupancy_map(position, n_bins=50, filter_width=2, padding=False, n_bins_padding=0):
+def occupancy_map(position, n_bins=50, filter_width=2, n_bins_padding=0):
     '''
     Computes the occupancy map based on the position through time.
 
@@ -546,7 +541,6 @@ def occupancy_map(position, n_bins=50, filter_width=2, padding=False, n_bins_pad
         position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
         filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
-        padding (bool; default=False): if True, 'padding_n' extra 0s are added to the walls of the arena.
         padding_n (int; default=0): the number of extra pixels that are added to every side of the arena.
 
     Returns:
@@ -577,11 +571,10 @@ def occupancy_map(position, n_bins=50, filter_width=2, padding=False, n_bins_pad
         ind_x, ind_y = p
         map_occ[ind_x, ind_y] += 1
 
-    if padding:
-        map_occ = np.pad(map_occ, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
+    map_occ = np.pad(map_occ, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
 
     map_occ = ratemap_filtered_Gaussian(map_occ, filter_width)
-    map_occ = map_occ/np.max(map_occ)
+    map_occ = map_occ/np.sum(map_occ, axis=(0,1))
     occupancy_map = map_occ.T
 
     return occupancy_map
@@ -1183,7 +1176,7 @@ def build_hulls(embeddings, images_2d, max_act_thres=0.8):
     '''
 
     # Determine the number of active units
-    n_active_units = np.count_nonzero(np.any(embeddings, axis=0))
+    n_active_units = n_active_cells(embeddings)
 
     # Get indexes of images that most strongly activate each unit.
     indxs = get_indxs_imgs_max_activity(embeddings, max_act_thres=max_act_thres)

@@ -252,6 +252,53 @@ def train_autoencoder(model, train_loader, opt=optim.Adam, dataset=[], model_lat
     return history, powerlaw_scores, intrinsic_dims, event_memory_scores
 
 
+def train_autoencoder_v2(model, train_loader, eval_functions, opt=optim.Adam, dataset=[], num_epochs=1000, learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0):
+    '''
+    Train an autoencoder and compute custom metrics during training.
+
+    Args:
+        model (torch.nn.Module): The neural network model to train.
+        train_loader (DataLoader): DataLoader for training data.
+        eval_functions (list): A list of functions to evaluate the model's performance periodically.
+        num_epochs (int): Number of epochs to train.
+        learning_rate (float): Learning rate for the optimizer.
+        alpha, beta, gamma (float): Custom hyperparameters for loss adjustment.
+        L2_weight_decay (float): Weight decay for L2 regularization.
+
+    Returns:
+        dict: A dictionary containing lists of metrics recorded during training including loss.
+    '''
+    optimizer = opt(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
+    criterion = nn.MSELoss()
+    model = model.to('cuda')
+    results = {'loss': []}
+    results.update({func.__name__: [] for func in eval_functions})
+
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        model.train()
+        with tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}") as pbar:
+            for inputs, _ in train_loader:
+                inputs = inputs.to('cuda')
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta, gamma=gamma)
+                running_loss += loss.item()
+                pbar.update(1)
+
+        # Record the average loss of this epoch.
+        avg_loss = running_loss / len(train_loader)
+        results['loss'].append(avg_loss)
+        pbar.set_description(f"Loss: {avg_loss:.4f}")
+
+        # Evaluate the model with each function in eval_functions.
+        model.eval()
+        with torch.no_grad():
+            for func in eval_functions:
+                result = func(model)
+                results[func.__name__].append(result)
+
+    return results
+
+
 def predict(image, model):
     '''
     Returns the output of model(image), and reshapes it to be compatible with plotting funtions such as plt.imshow().
