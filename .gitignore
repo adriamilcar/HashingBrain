@@ -8,3 +8,4 @@ ephys_data/
 "datasets/" 
 datasets/ 
 diagrams/ 
+results/spatial_allModels.pkl 
