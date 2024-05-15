@@ -1131,7 +1131,7 @@ def encode_images(dataset, network='CLIP'):
     return np.array(features)
 
 
-def reduce_dimensionality(features, method='UMAP'):
+def reduce_dimensionality(features, method='UMAP', umap_args=[10, 0.1]):
     '''
     Reduces the dimensionality of the given feature matrix to 2D using specified method.
 
@@ -1158,7 +1158,7 @@ def reduce_dimensionality(features, method='UMAP'):
         reduced = mds.fit_transform(features)
     elif method.upper() == 'UMAP':
         # UMAP
-        umap_fit = umap.UMAP(n_components=2, n_neighbors=10, min_dist=0.1)
+        umap_fit = umap.UMAP(n_components=2, n_neighbors=umap_args[0], min_dist=umap_args[1])
         reduced = umap_fit.fit_transform(features)
     else:
         raise ValueError("Unsupported method: {}. Use 'UMAP', 'TSNE', or 'MDS'.".format(method))
