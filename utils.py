@@ -148,7 +148,7 @@ def ratemap_filtered_Gaussian(ratemap, std=2):
     return new_ratemap
 
 
-def ratemaps(embeddings, position, n_bins=50, filter_width=3, occupancy_map=[], n_bins_padding=0):
+def generate_ratemaps(embeddings, position, n_bins=50, filter_width=3, n_bins_padding=0):
     '''
     Creates smooth ratemaps from latent embeddings (activity) and spatial position through time.
 
@@ -157,7 +157,6 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=3, occupancy_map=[], 
         position (2D numpy array): 2D matrix containing the (x,y) spatial position through time, with shape (n_samples, 2).
         n_bins (int; default=50): resolution of the (x,y) discretization of space from which the ratemaps will be computed.
         filter_width (float; default=2): standard deviation of the Gaussian filter to be applied (in 'pixel' or bin units).
-        occupancy_map (2D numpy array; default=[]): 2D matrix reflecting the occupancy time across the space, with shape (n_bins+2*n_bins_padding, n_bins+2*n_bins_padding).
         n_bins_padding (int; default=0): the number of extra pixels with 0 value that are added to every side of the arena.
 
     Returns:
@@ -184,6 +183,9 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=3, occupancy_map=[], 
     pos_imgs_norm *= n_bins-1
     pos_imgs_norm = pos_imgs_norm.round(0).astype(int)
 
+    # Build occupancy map
+    occupancy_map = generate_occupancy_map(position, n_bins=n_bins, filter_width=0, n_bins_padding=0, norm=False)
+
     # Add activation values to each cell in the ratemap and adds Gaussian smoothing.
     n_latent = embeddings.shape[1]
     ratemaps = np.zeros((n_latent, int(n_bins+2*n_bins_padding), int(n_bins+2*n_bins_padding)))
@@ -208,7 +210,7 @@ def ratemaps(embeddings, position, n_bins=50, filter_width=3, occupancy_map=[], 
     return ratemaps
 
 
-def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, max_pix_cluster=0.5, active_threshold=0.2):
+def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.03, max_pix_cluster=0.5, active_threshold=0.2):
     '''
     Runs a simple clustering algorithm to identify place fields, and compute their number, centroids, and sizes, for all ratemaps.
 
@@ -297,7 +299,7 @@ def stats_place_fields(ratemaps, peak_as_centroid=True, min_pix_cluster=0.02, ma
                 w_y = r[:, np.where(clustered_matrix_==k)[1]].sum(axis=0)
                 w_y = w_y/w_y.sum()
                 y = np.sum(w_y * np.where(clustered_matrix_==k)[1])
-            centroids.append([x,y])
+            centroids.append([y,x])
 
         all_centroids += centroids
         
@@ -533,7 +535,7 @@ def hamming_dist_matrix(hashes):
     return hash_diffs, similarity_matrix
 
 
-def occupancy_map(position, n_bins=50, filter_width=2, n_bins_padding=0):
+def generate_occupancy_map(position, n_bins=50, filter_width=0, n_bins_padding=0, norm=True):
     '''
     Computes the occupancy map based on the position through time.
 
@@ -574,7 +576,10 @@ def occupancy_map(position, n_bins=50, filter_width=2, n_bins_padding=0):
     map_occ = np.pad(map_occ, ((n_bins_padding, n_bins_padding), (n_bins_padding, n_bins_padding)), mode='constant', constant_values=0)
 
     map_occ = ratemap_filtered_Gaussian(map_occ, filter_width)
-    map_occ = map_occ/np.sum(map_occ, axis=(0,1))
+
+    if norm:
+        map_occ = map_occ/np.sum(map_occ, axis=(0,1))
+
     occupancy_map = map_occ.T
 
     return occupancy_map

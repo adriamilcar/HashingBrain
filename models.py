@@ -21,7 +21,7 @@ def RAI(fan_in, fan_out):
 
 
 class Conv_AE(nn.Module):
-    def __init__(self, n_hidden=100, hidden_regularization=True, weight_init='RAI'):
+    def __init__(self, n_hidden=100, weight_init='RAI'):
         '''
         Convolutional autoencoder in PyTorch, prepared to process images of shape (84,84,3). A sparsity constraint can be added to the middle layer.
 
@@ -29,8 +29,6 @@ class Conv_AE(nn.Module):
             n_hidden (int; default=100): number of hidden units in the middle layer.
         '''
         super().__init__()
-
-        self.hidden_regularization = hidden_regularization
 
         self.n_hidden = n_hidden
         self.dim1, self.dim2 = 10, 10
@@ -49,8 +47,6 @@ class Conv_AE(nn.Module):
 
         if weight_init == 'RAI':
             self.apply_custom_initialization()
-        else:
-            pass
 
     def apply_custom_initialization(self):
         fan_in, fan_out = self.fc1.weight.data.size(1), self.fc1.weight.data.size(0)
@@ -81,7 +77,7 @@ class Conv_AE(nn.Module):
         out = self.decoder(h)
         return out, h
 
-    def backward(self, optimizer, criterion, x, y_true, alpha=0, beta=0, gamma=0):
+    def backward(self, optimizer, criterion, x, y_true, alpha=0, beta=0):
 
         optimizer.zero_grad()
 
@@ -89,101 +85,34 @@ class Conv_AE(nn.Module):
 
         recon_loss = criterion(y_pred, y_true)
 
-        # Whitening loss (soft batch whitening).
-        whitening_loss = 0
+        orthonormal_loss = 0
         sparsity_loss = 0
-        variability_loss = 0
         batch_size, hidden_dim = hidden.shape
-        if self.hidden_regularization:
 
-            if alpha != 0:
-                # SSCP matrix
-                M = torch.mm(hidden.t(), hidden)
+        if alpha != 0:
+            # SSCP matrix
+            M = torch.mm(hidden.t(), hidden)
 
-                # Covariance matrix
-                #hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
-                #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
+            # Covariance matrix
+            #hidden_centered = hidden - torch.mean(hidden, dim=0, keepdim=True)
+            #M = torch.mm(hidden_centered.t(), hidden_centered) / (batch_size-1)
 
-                I = torch.eye(hidden_dim, device='cuda')
-                lambda_ = 1 #0.1
-                C = lambda_*I - M   # orthonormality (whitening?) --> generates spatial tuning
-                #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
-                #C = I - M * I      # standarization --> does not generate spatial tuning
-                whitening_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)   # change to /(hidden_dim**2)
-        
-            if beta != 0:
-                #sparsity_loss = beta * torch.norm(hidden, 1) / (batch_size*hidden_dim)  # L1 regularization
-                sparsity_loss = beta * torch.sum(torch.abs(hidden)) / (batch_size*hidden_dim)
+            I = torch.eye(hidden_dim, device='cuda')
+            C = I - M   # orthonormality --> generates spatial tuning
+            #C = M * (1 - I)    # decorrelation --> does not generate spatial tuning
+            #C = I - M * I      # standarization --> does not generate spatial tuning
+            orthonormal_loss = alpha * torch.norm(C) / (batch_size*hidden_dim)   # change to /(hidden_dim**2)
+    
+        if beta != 0:
+            sparsity_loss = beta * torch.mean(torch.norm(hidden, p=1, dim=1))    # L1 regularization
+            #sparsity_loss = beta * torch.sum(torch.abs(hidden)) / (batch_size*hidden_dim)
 
-            if gamma != 0:
-                variability_loss = -gamma * torch.sum(torch.var(hidden, dim=0)) / hidden_dim
-
-        loss = recon_loss + whitening_loss + sparsity_loss + variability_loss
+        loss = recon_loss + orthonormal_loss + sparsity_loss
         loss.backward()
 
         optimizer.step()
 
         return recon_loss.item()
-
-
-class Conv_VAE(nn.Module):
-    def __init__(self, n_hidden=100):
-        super().__init__()
-
-        self.n_hidden = n_hidden
-        self.dim1, self.dim2 = 10, 10
-
-        # Encoder
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=4, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
-        self.fc1 = nn.Linear(64 * self.dim1 * self.dim2, n_hidden*2)
-
-        # Decoder
-        self.fc2 = nn.Linear(n_hidden, 64 * self.dim1 * self.dim2)
-        self.conv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1, output_padding=1)
-        self.conv5 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1, output_padding=0)
-        self.conv6 = nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1, output_padding=0)
-
-    def encoder(self, x):
-        # Encoder
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))  
-        x = x.view(-1, 64 * self.dim1 * self.dim2)  
-        x = F.relu(self.fc1(x))
-        return x
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5*logvar)
-        eps = torch.randn_like(std)
-        z = mu + eps*std
-        return z
-
-    def decoder(self, x):
-        # Decoder
-        x = F.relu(self.fc2(x)) 
-        x = x.view(-1, 64, self.dim1, self.dim2) 
-        x = F.relu(self.conv4(x)) 
-        x = F.relu(self.conv5(x))  
-        x = torch.sigmoid(self.conv6(x))  
-        return x
-
-    def forward(self, x):
-        h = self.encoder(x)
-        mu, logvar = torch.chunk(h, 2, dim=1)
-        z = self.reparameterize(mu, logvar)
-        out = self.decoder(z)
-        return out, mu, logvar
-
-    def backward(self, optimizer, criterion, x, y_true, alpha=0): #, L1_lambda=0, soft_sparsity_weight=0, epoch=0):
-        optimizer.zero_grad()
-        y_pred, mu, logvar = self.forward(x)
-        kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        loss = criterion(y_pred, y_true) + kl_div
-        loss.backward()
-        optimizer.step()
-        return loss.item()
 
 
 def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
@@ -203,57 +132,8 @@ def create_dataloader(dataset, batch_size=256, reshuffle_after_epoch=True):
     return DataLoader(tensor_dataset, batch_size=batch_size, shuffle=reshuffle_after_epoch)
 
 
-def train_autoencoder_old(model, train_loader, opt=optim.Adam, dataset=[], model_latent=None, num_epochs=1000, learning_rate=1e-4, alpha=2e3, beta=0, gamma=0, L2_weight_decay=0):
-    '''
-    TO DO.
-    '''
-    optimizer = opt(model.parameters(), lr=learning_rate, weight_decay=L2_weight_decay)
-    criterion = nn.MSELoss()
-
-    model = model.to('cuda')
-
-    history = []
-    #embeddings = []
-    powerlaw_scores = []
-    intrinsic_dims = []
-    event_memory_scores = []
-    if len(dataset) > 0:
-        #embeddings = [ get_latent_vectors(dataset=dataset, model=model) ]
-        embeddings = get_latent_vectors(dataset=dataset, model=model)
-        powerlaw_scores = [ get_powerlaw_exp(embeddings) ]
-        intrinsic_dims = [ intrinsic_dimensionality(embeddings, method='PCA') ]
-        if model_latent != None:
-            event_memory_scores = [ event_memories_quality(model, model_latent, dataset, clamping_value=0.4) ]
-    for epoch in range(num_epochs):
-        running_loss = 0.
-        with tqdm(total=len(train_loader)) as pbar:
-            for i, data in enumerate(train_loader, 0):
-                inputs, _ = data
-                inputs = inputs.to('cuda')
-
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta, gamma=gamma)
-                running_loss += loss
-
-                pbar.update(1)
-                pbar.set_description(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}")
-
-        history.append(running_loss/len(train_loader))
-
-        if len(dataset) > 0:
-            #embeddings.append( get_latent_vectors(dataset=dataset, model=model) )
-            embeddings = get_latent_vectors(dataset=dataset, model=model)
-            powerlaw_scores.append( get_powerlaw_exp(embeddings) )
-            intrinsic_dims.append( intrinsic_dimensionality(embeddings, method='PCA') )
-            if model_latent != None:
-                event_memory_scores.append( event_memories_quality(model, model_latent, dataset, clamping_value=0.4) )
-
-    #embeddings = np.array(embeddings)
-
-    return history, powerlaw_scores, intrinsic_dims, event_memory_scores
-
-
 def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim.Adam, num_epochs=1000, 
-                      learning_rate=1e-4, alpha=1e3, beta=0, gamma=0, L2_weight_decay=0, loss_threshold=None):
+                      learning_rate=1e-4, alpha=1e3, beta=0, L2_weight_decay=0, loss_threshold=None):
     '''
     Train an autoencoder and compute custom metrics during training.
 
@@ -264,7 +144,7 @@ def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim
         eval_functions (list): A list of functions to evaluate the model's performance periodically.
         num_epochs (int): Number of epochs to train.
         learning_rate (float): Learning rate for the optimizer.
-        alpha, beta, gamma (float): Custom hyperparameters for loss regularization.
+        alpha, beta (float): Custom hyperparameters for loss regularization.
         L2_weight_decay (float): Weight decay for L2 regularization.
         loss_threshold (float, optional): If provided, training will stop early if the loss drops below this value.
 
@@ -283,7 +163,7 @@ def train_autoencoder(model, train_loader, dataset, eval_functions=[], opt=optim
         with tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}") as pbar:
             for inputs, _ in train_loader:
                 inputs = inputs.to('cuda')
-                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta, gamma=gamma)
+                loss = model.backward(optimizer=optimizer, criterion=criterion, x=inputs, y_true=inputs, alpha=alpha, beta=beta)
                 running_loss += loss
 
                 pbar.update(1)

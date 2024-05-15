@@ -4,18 +4,34 @@ import seaborn as sb
 from scipy.stats import expon
 
 
-def plot_ratemaps(r, save=False):
+def plot_ratemaps(ratemaps, save=False):
     '''
     TO DO.
     '''
     plt.figure(figsize=(20,20), dpi=600)
     for i in range(100):
         plt.subplot(10, 10, i+1)
-        plt.imshow(r[i], cmap='hot', origin='lower')
+        plt.imshow(ratemaps[i], cmap='hot', origin='lower')
         plt.axis('off')
     plt.tight_layout()
     if save:
         plt.savefig('plot_ratemaps.jpg', dpi=600)
+    plt.show()
+
+
+def plot_ratemaps_with_centroids(ratemaps, num_fields, centroids, save=False):
+    plt.figure(figsize=(20,20), dpi=600)
+    for i in range(100):
+        plt.subplot(10, 10, i+1)
+        plt.imshow(ratemaps[i], cmap='hot', origin='lower')
+        for j in np.arange(num_fields[i]):
+            indx = int(np.sum(num_fields[:i]) + j)
+            x, y = centroids[indx]
+            plt.scatter(x, y, s=150, c='blue', marker='x')
+        plt.axis('off')
+    plt.tight_layout()
+    if save:
+        plt.savefig('plot_ratemaps_centroids.jpg', dpi=600)
     plt.show()
 
 
