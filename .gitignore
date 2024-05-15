@@ -1,11 +1,7 @@
-"calcium_data/event_traces_Ca2_HPC.mat" 
-"calcium_data/" 
-calcium_data/ 
-calcium_data/event_traces_Ca2_HPC.mat 
-results/pairwise_corr_values_calcium_V1.npy 
-results/pairwise_corr_values_calcium_CA1.npy 
-ephys_data/ 
-"datasets/" 
+calcium/data/ 
+ephys/data/  
 datasets/ 
 diagrams/ 
+results/pairwise_corr_values_calcium_V1.npy 
+results/pairwise_corr_values_calcium_CA1.npy 
 results/spatial_allModels.pkl 
