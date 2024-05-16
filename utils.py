@@ -1003,7 +1003,6 @@ def zca_embeddings_whitening(embeddings):
     return whitened_features
 
 
-
 def get_powerlaw_exp(embeddings, start_fit=0, cutoff_fit=500, cutoff_dim=None):
     '''
     TO DO.
@@ -1019,7 +1018,7 @@ def get_powerlaw_exp(embeddings, start_fit=0, cutoff_fit=500, cutoff_dim=None):
 
     m, b = np.polyfit(np.log(x[start_fit:cutoff_fit]), np.log(y[start_fit:cutoff_fit]), 1)
 
-    return m, b
+    return m, b, variances
 
 
 def get_indxs_imgs_max_activity(embeddings, max_act_thres=0.8):
