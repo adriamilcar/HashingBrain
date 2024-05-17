@@ -5,3 +5,6 @@ diagrams/
 results/pairwise_corr_values_calcium_V1.npy 
 results/pairwise_corr_values_calcium_CA1.npy 
 results/spatial_allModels.pkl 
+results/all_pairwiseCorrs.pkl 
+results/all_Wsims.pkl 
+
