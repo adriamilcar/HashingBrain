@@ -281,28 +281,24 @@ def get_embeddings(dataset, model, batch_size=256):
 
 def normalize_and_reorder(arr):
     """
-    This function takes a 2D numpy array and performs two operations:
-    1. Normalizes each row of the array based on its maximum value.
-    2. Reorders the rows based on the index of the peak (maximum) value in each row.
+    Rearranges the array so that the neurons are sorted based on the index of their maximum value.
 
     Parameters:
-    arr (numpy.ndarray): The input 2D numpy array.
+    arr (numpy.ndarray): A 2D array with shape (n_freqs, n_neurons) representing the activity of neurons.
 
     Returns:
-    numpy.ndarray: The processed 2D numpy array.
+    numpy.ndarray: A 2D array with neurons sorted based on the index of their maximum value.
     """
-    # Normalize each row by its maximum value
-    row_maxes = np.max(arr, axis=1).reshape(-1, 1)
-    normalized_arr = arr / row_maxes
-
-    # Find the index of the maximum value in each row
-    peak_indices = np.argmax(normalized_arr, axis=1)
-
-    # Reorder the rows based on the peak indices
-    sorted_indices = np.argsort(peak_indices)
-    reordered_arr = normalized_arr[sorted_indices]
-
-    return reordered_arr
+    # Step 1: Determine the index of the maximum value for each neuron
+    max_indices = np.argmax(arr, axis=0)
+    
+    # Step 2: Get the sorted order of the neurons based on these indices
+    sorted_neuron_indices = np.argsort(max_indices)
+    
+    # Step 3: Rearrange the array based on the sorted neuron indices
+    sorted_activity_array = arr[:, sorted_neuron_indices]
+    
+    return sorted_activity_array
 
 
 def extract_feature_images(model, embeddings, clamping_value='max_unit'):
